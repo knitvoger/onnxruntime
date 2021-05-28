@@ -253,7 +253,8 @@ export class WebGLInferenceHandler implements InferenceHandler {
     if (!this.session.backend.glContext.isFloat32DownloadSupported) {
       const op = new WebGLUint8Encode();
       const uint8TD = op.runInternal(this, textureData);
-      return this.session.textureManager.readUint8TextureAsFloat(uint8TD);
+      const float32Data = this.session.textureManager.readUint8TextureAsFloat(uint8TD);
+      return this.session.textureManager.fromFloatToTenorDataType(textureData.tensor.type, float32Data);
     }
     return this.session.textureManager.readTexture(textureData, textureData.tensor.type, textureData.channels);
   }

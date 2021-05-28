@@ -125,6 +125,32 @@ export class TextureManager {
       this.glContext.deleteTexture(textureData.texture);
     }
   }
+  // For WebGL1, ToTensorData function always throws an exception:
+  // "TypedArray.from requires its this argument subclass a TypedArray constructor"
+  // this function avoids using TypedArray.from.
+  fromFloatToTenorDataType(dataType: Tensor.DataType, data: Float32Array): Tensor.NumberType {
+    switch (dataType) {
+      case 'int16':
+        return data instanceof Int16Array ? data : new Int16Array(data);
+      case 'int32':
+        return data instanceof Int32Array ? data : new Int32Array(data);
+      case 'int8':
+        return data instanceof Int8Array ? data : new Int8Array(data);
+      case 'uint16':
+        return data instanceof Uint16Array ? data : new Uint16Array(data);
+      case 'uint32':
+        return data instanceof Uint32Array ? data : new Uint32Array(data);
+      case 'uint8':
+      case 'bool':
+        return data instanceof Uint8Array ? data : new Uint8Array(data);
+      case 'float32':
+        return data instanceof Float32Array ? data : new Float32Array(data);
+      case 'float64':
+        return data instanceof Float64Array ? data : new Float64Array(data);
+      default:
+        throw new Error(`TensorData type ${dataType} is not supported`);
+    }
+  }
   toTensorData(dataType: Tensor.DataType, data: Encoder.DataArrayType): Tensor.NumberType {
     switch (dataType) {
       case 'int16':
