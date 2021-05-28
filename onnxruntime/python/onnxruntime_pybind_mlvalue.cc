@@ -3,6 +3,7 @@
 
 #include "onnxruntime_pybind_mlvalue.h"
 #include "python/onnxruntime_pybind_state_common.h"
+#include "pybind11/numpy.h"
 
 #define NO_IMPORT_ARRAY
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
@@ -33,15 +34,28 @@ using namespace onnxruntime::logging;
 const char* PYTHON_ORTVALUE_OBJECT_NAME = "OrtValue";
 const char* PYTHON_ORTVALUE_NATIVE_OBJECT_ATTR = "_ortvalue";
 
+const char* PYTHON_SPARSE_TENSOR_OBJECT_NAME = "SparseTensor";
+const char* PYTHON_SPARSE_TENSOR_NATIVE_OBJECT_ATTR = "_sparsetensor";
+
+PySparseTensor ::~PySparseTensor() = default;
+
 static bool PyObjectCheck_NumpyArray(PyObject* o) {
   return PyObject_HasAttrString(o, "__array_finalize__");
+}
+
+bool IsNumpyArray(py::object& obj) {
+  return PyObjectCheck_NumpyArray(obj.ptr());
 }
 
 bool IsNumericNumpyType(int npy_type) {
   return npy_type < NPY_OBJECT || npy_type == NPY_HALF;
 }
 
-bool IsNumericNumpyArray(py::object& py_object) {
+int GetNumpyArrayType(const py::object& obj) {
+  return PyArray_TYPE(reinterpret_cast<PyArrayObject*>(obj.ptr()));
+}
+
+bool IsNumericNumpyArray(const py::object& py_object) {
   if (PyObjectCheck_NumpyArray(py_object.ptr())) {
     int npy_type = PyArray_TYPE(reinterpret_cast<PyArrayObject*>(py_object.ptr()));
     return IsNumericNumpyType(npy_type);
@@ -51,13 +65,16 @@ bool IsNumericNumpyArray(py::object& py_object) {
 }
 
 static TensorShape GetArrayShape(PyArrayObject* pyObject) {
-  int ndim = PyArray_NDIM(pyObject);
+  const int ndim = PyArray_NDIM(pyObject);
   const npy_intp* npy_dims = PyArray_DIMS(pyObject);
-  std::vector<int64_t> dims(ndim);
-  for (int i = 0; i < ndim; ++i) {
-    dims[i] = npy_dims[i];
-  }
-  TensorShape shape(std::move(dims));
+  auto span = gsl::make_span(npy_dims, ndim);
+  TensorShape shape(span.cbegin(), span.cend());
+  return shape;
+}
+
+TensorShape GetShape(const py::array& arr) {
+  auto span = gsl::make_span(arr.shape(), arr.ndim());
+  TensorShape shape(span.cbegin(), span.cend());
   return shape;
 }
 
@@ -320,13 +337,22 @@ using OrtPybindSingleUseAllocatorPtr = std::shared_ptr<OrtPybindSingleUseAllocat
 // Expects p_tensor properly created
 // Does not manage darray life-cycle
 
-static void CopyDataToTensor(PyArrayObject* darray, int npy_type, std::unique_ptr<Tensor>& p_tensor,
+void CopyDataToTensor(const py::array& py_array, int npy_type, Tensor& tensor, MemCpyFunc mem_cpy_to_device) {
+  CopyDataToTensor(reinterpret_cast<PyArrayObject*>(py_array.ptr()), npy_type, tensor, mem_cpy_to_device);
+}
+
+inline void CopyDataToTensor(PyArrayObject* darray, int npy_type, std::unique_ptr<Tensor>& p_tensor,
+  MemCpyFunc mem_cpy_to_device = CpuToCpuMemCpy) {
+  CopyDataToTensor(darray, npy_type, *p_tensor, mem_cpy_to_device);
+}
+
+static void CopyDataToTensor(PyArrayObject* darray, int npy_type, Tensor& tensor,
                              MemCpyFunc mem_cpy_to_device = CpuToCpuMemCpy) {
-  const auto total_items = p_tensor->Shape().Size();
+  const auto total_items = tensor.Shape().Size();
   if (npy_type == NPY_UNICODE) {
     // Copy string data which needs to be done after Tensor is allocated.
     // Strings are Python strings or numpy.unicode string.
-    std::string* dst = p_tensor->MutableData<std::string>();
+    std::string* dst = tensor.MutableData<std::string>();
     const auto item_size = PyArray_ITEMSIZE(darray);
     const auto num_chars = item_size / PyUnicode_4BYTE_KIND;
     const char* src = reinterpret_cast<const char*>(PyArray_DATA(darray));
@@ -348,7 +374,7 @@ static void CopyDataToTensor(PyArrayObject* darray, int npy_type, std::unique_pt
     // Strings are given as bytes (encoded strings).
     // NPY_VOID does not trim final 0.
     // NPY_STRING assumes bytes string ends with a final 0.
-    std::string* dst = p_tensor->MutableData<std::string>();
+    std::string* dst = tensor.MutableData<std::string>();
     const auto item_size = PyArray_ITEMSIZE(darray);
     const char* src = reinterpret_cast<const char*>(PyArray_DATA(darray));
     for (int i = 0; i < total_items; i++, src += item_size) {
@@ -360,7 +386,7 @@ static void CopyDataToTensor(PyArrayObject* darray, int npy_type, std::unique_pt
     }
   } else if (npy_type == NPY_OBJECT) {
     // Converts object into string.
-    std::string* dst = p_tensor->MutableData<std::string>();
+    std::string* dst = tensor.MutableData<std::string>();
     const auto item_size = PyArray_ITEMSIZE(darray);
     const char* src = reinterpret_cast<const char*>(PyArray_DATA(darray));
     for (int i = 0; i < total_items; ++i, src += item_size) {
@@ -371,9 +397,9 @@ static void CopyDataToTensor(PyArrayObject* darray, int npy_type, std::unique_pt
       dst[i] = py::reinterpret_borrow<py::str>(pStr);
     }
   } else {
-    void* buffer = p_tensor->MutableDataRaw();
+    void* buffer = tensor.MutableDataRaw();
     size_t len;
-    if (!IAllocator::CalcMemSizeForArray(p_tensor->DataType()->Size(), p_tensor->Shape().Size(), &len)) {
+    if (!IAllocator::CalcMemSizeForArray(tensor.DataType()->Size(), tensor.Shape().Size(), &len)) {
       throw std::runtime_error("length overflow");
     }
     mem_cpy_to_device(buffer, PyArray_DATA(darray), len);
@@ -721,7 +747,7 @@ static void CreateGenericIterableMLValue(PyObject* iterator, AllocatorPtr alloc,
 // as the backing data buffer for the ORT Tensor where applicable (for numeric tensors)
 // The numpy object owns the memory and needs to be alive until the corresponding OrtValue is in scope
 void CreateGenericMLValue(const onnxruntime::InputDefList* input_def_list, const AllocatorPtr& alloc, const std::string& name_input,
-                          py::object& value, OrtValue* p_mlvalue, bool accept_only_numpy_array,
+                          const py::object& value, OrtValue* p_mlvalue, bool accept_only_numpy_array,
                           bool use_numpy_data_memory, MemCpyFunc mem_cpy_to_device) {
   onnx::TypeProto type_proto;
   if (PyObjectCheck_NumpyArray(value.ptr())) {
