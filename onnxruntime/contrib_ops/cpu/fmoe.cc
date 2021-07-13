@@ -24,7 +24,44 @@ namespace onnxruntime {
 namespace contrib {
 
 Status FMoE::Compute(OpKernelContext* context) const {
-    printf("FFFFFFM MMMMMMooooooEEEEEEEEE\n");
+    const auto* X = context->Input<Tensor>(0);
+    const auto* W = context->Input<Tensor>(1);
+    const auto* B = context->Input<Tensor>(2);
+    const auto* input_num_expert = context->Input<Tensor>(3);
+    const auto* input_top_k = context->Input<Tensor>(4);
+    const auto* input_gate_index = context->Input<Tensor>(5);
+    const auto* input_gate_score = context->Input<Tensor>(6);
+
+    // Dimensions
+    int64_t sequence = X->Shape()[0];
+    int64_t in_chs = X->Shape()[1];
+    int64_t out_chs = W->Shape()[1];
+
+    // Inputs
+    const float *Xdata = X->template Data<float>();
+    const float *Wdata = W->template Data<float>();
+    const float *Bdata = B->template Data<float>();
+    const int64_t num_expert = *(input_num_expert->template Data<int64_t>());
+    const int64_t top_k = *(input_top_k->template Data<int64_t>());
+    const int64_t *gate_index = input_gate_index->template Data<int64_t>();
+    const float *gate_score= input_gate_score->template Data<float>();
+
+    // Output
+    std::vector<int64_t> Y_dims({sequence, out_chs});
+    Tensor* Y = context->Output(0, Y_dims);
+    float* Ydata = Y->template MutableData<float>();
+
+    ONNX_UNUSED_PARAMETER(Xdata);
+    ONNX_UNUSED_PARAMETER(Wdata);
+    ONNX_UNUSED_PARAMETER(Bdata);
+    ONNX_UNUSED_PARAMETER(gate_index);
+    ONNX_UNUSED_PARAMETER(gate_score);
+    ONNX_UNUSED_PARAMETER(sequence);
+    ONNX_UNUSED_PARAMETER(in_chs);
+    ONNX_UNUSED_PARAMETER(out_chs);
+    ONNX_UNUSED_PARAMETER(Ydata);
+
+    printf("num_expert %ld, top_k %ld\n", num_expert, top_k);
     return Status::OK();
 }
 
