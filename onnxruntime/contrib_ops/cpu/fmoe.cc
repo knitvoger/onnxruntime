@@ -25,6 +25,27 @@
 namespace onnxruntime {
 namespace contrib {
 
+
+void DumpCPU(const char *file, const float *cpu_data, long size, long row)
+{
+	FILE *pFile = fopen(file, "w");
+
+	if (pFile)
+	{
+		for (long i = 0; i < size; i++)
+		{
+			fprintf(pFile, "%.5lf ", (cpu_data[i]));
+			if ((i + 1) % row == 0)
+			{
+				fprintf(pFile, "\n");
+			}
+		}
+
+	}
+
+	fclose(pFile);
+}
+
 Status FMoE::Compute(OpKernelContext* context) const {
     const auto* X = context->Input<Tensor>(0);
     const auto* W = context->Input<Tensor>(1);
@@ -48,6 +69,7 @@ Status FMoE::Compute(OpKernelContext* context) const {
     const int64_t *gate_index = input_gate_index->template Data<int64_t>();
     const float *gate_score= input_gate_score->template Data<float>();
 
+    //DumpCPU("onnx.input.txt", Xdata, 98*384, 384);
     // Output
     std::vector<int64_t> Y_dims({sequence * 2, out_chs});
     Tensor* Y = context->Output(0, Y_dims);
@@ -63,6 +85,7 @@ Status FMoE::Compute(OpKernelContext* context) const {
     ONNX_UNUSED_PARAMETER(in_chs);
     ONNX_UNUSED_PARAMETER(out_chs);
     ONNX_UNUSED_PARAMETER(Ydata);
+    ONNX_UNUSED_PARAMETER(num_expert);
 
     /*AllocatorPtr alloc;
     ORT_RETURN_IF_ERROR(context->GetTempSpaceAllocator(&alloc));
@@ -100,7 +123,7 @@ Status FMoE::Compute(OpKernelContext* context) const {
 
     
 
-    printf("num_expert %ld, top_k %ld\n", num_expert, top_k);
+    //printf("num_expert %ld, top_k %ld\n", num_expert, top_k);
     return Status::OK();
 }
 
