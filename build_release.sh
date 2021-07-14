@@ -1,0 +1,2 @@
+./build.sh --build_shared_lib --parallel --skip_tests --config Release  --build_dir build_cpu_release
+cp build_cpu_release/Release/libonnxruntime.so.1.8.0 ~/git/GPU-Wavenet/onnxwrapper/libonnxruntime.so
