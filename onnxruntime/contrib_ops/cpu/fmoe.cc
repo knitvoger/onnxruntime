@@ -96,8 +96,6 @@ Status FMoE::Compute(OpKernelContext* context) const {
     concurrency::ThreadPool* thread_pool = context->GetOperatorThreadPool();
     MLAS_ACTIVATION activation;
     activation.ActivationKind = MlasIdentityActivation;
-    TensorShape input_shape = X->Shape().Slice(2);
-    TensorShape output_shape = Y->Shape().Slice(2);
     std::vector<int64_t> kernel_shape(1, 1);
     std::vector<int64_t> pads(2, 0);
     std::vector<int64_t> dilations(1, 1);
@@ -111,6 +109,9 @@ Status FMoE::Compute(OpKernelContext* context) const {
         
         const float *weight = Wdata + gate_index_k[0] * in_chs * out_chs;
         const float *bias = Bdata + gate_index_k[0] * out_chs;
+        ONNX_UNUSED_PARAMETER(output_k);
+        ONNX_UNUSED_PARAMETER(weight);
+        ONNX_UNUSED_PARAMETER(bias);
         /*for (int i = 0; i < sequence; i++)
         {
             const float *weight = Wdata + gate_index_k[0] * in_chs * out_chs;
@@ -129,6 +130,8 @@ Status FMoE::Compute(OpKernelContext* context) const {
 
         MLAS_CONV_PARAMETERS Parameters;
         size_t WorkingBufferSize;
+        TensorShape input_shape = X->Shape().Slice(2);  // input seq
+        TensorShape output_shape = X->Shape().Slice(2); // output seq. Final output is input_seq * top_k
         MlasConvPrepare(&Parameters,
                         1,
                         1,
@@ -163,6 +166,7 @@ Status FMoE::Compute(OpKernelContext* context) const {
     
 
     //printf("num_expert %ld, top_k %ld\n", num_expert, top_k);
+
     return Status::OK();
 }
 
