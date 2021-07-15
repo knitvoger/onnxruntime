@@ -56,7 +56,7 @@ Status FMoE::Compute(OpKernelContext* context) const {
     const auto* input_gate_score = context->Input<Tensor>(6);
 
     // Dimensions
-    int64_t sequence = X->Shape()[0];
+    int64_t sequence = X->Shape()[2];
     int64_t in_chs = X->Shape()[1];
     int64_t out_chs = W->Shape()[1];
 
@@ -71,7 +71,7 @@ Status FMoE::Compute(OpKernelContext* context) const {
 
     //DumpCPU("onnx.input.txt", Xdata, 98*384, 384);
     // Output
-    std::vector<int64_t> Y_dims({sequence * 2, out_chs});
+    std::vector<int64_t> Y_dims({X->Shape()[0], out_chs, sequence * 2});
     Tensor* Y = context->Output(0, Y_dims);
     float* Ydata = Y->template MutableData<float>();
     //memset(Ydata, 0, sizeof(float) * sequence * out_chs);
@@ -87,22 +87,31 @@ Status FMoE::Compute(OpKernelContext* context) const {
     ONNX_UNUSED_PARAMETER(Ydata);
     ONNX_UNUSED_PARAMETER(num_expert);
 
-    /*AllocatorPtr alloc;
+    AllocatorPtr alloc;
     ORT_RETURN_IF_ERROR(context->GetTempSpaceAllocator(&alloc));
-    auto* output_k_data = alloc->Alloc(SafeInt<size_t>(sizeof(float)) * sequence * top_k * out_chs);
+    /*auto* output_k_data = alloc->Alloc(SafeInt<size_t>(sizeof(float)) * sequence * top_k * out_chs);
     BufferUniquePtr output_k_buffer = BufferUniquePtr(output_k_data, BufferDeleter(alloc));
     float* output_k_buffer_data = static_cast<float*>(output_k_buffer.get());*/
 
     concurrency::ThreadPool* thread_pool = context->GetOperatorThreadPool();
     MLAS_ACTIVATION activation;
     activation.ActivationKind = MlasIdentityActivation;
+    TensorShape input_shape = X->Shape().Slice(2);
+    TensorShape output_shape = Y->Shape().Slice(2);
+    std::vector<int64_t> kernel_shape(1, 1);
+    std::vector<int64_t> pads(2, 0);
+    std::vector<int64_t> dilations(1, 1);
+    std::vector<int64_t> strides(1, 1);
+
 
     for (int64_t k = 0; k < top_k; k++)
     {
         float *output_k = Ydata + k * sequence * out_chs;
-        const int64_t *gate_index_k = gate_index + sequence;
+        const int64_t *gate_index_k = gate_index + k * sequence;
         
-        //for (int i = 0; i < sequence; i++)
+        const float *weight = Wdata + gate_index_k[0] * in_chs * out_chs;
+        const float *bias = Bdata + gate_index_k[0] * out_chs;
+        /*for (int i = 0; i < sequence; i++)
         {
             const float *weight = Wdata + gate_index_k[0] * in_chs * out_chs;
             const float *bias = Bdata + gate_index_k[0] * out_chs;
@@ -116,7 +125,37 @@ Status FMoE::Compute(OpKernelContext* context) const {
                 thread_pool);
 
             MlasActivation(&activation, output_k, bias, out_chs, sequence,  sequence);
-        }
+        }*/
+
+        MLAS_CONV_PARAMETERS Parameters;
+        size_t WorkingBufferSize;
+        MlasConvPrepare(&Parameters,
+                        1,
+                        1,
+                        1,
+                        in_chs,
+                        input_shape.GetDims().data(),
+                        kernel_shape.data(),
+                        dilations.data(),
+                        pads.data(),
+                        strides.data(),
+                        output_shape.GetDims().data(),
+                        out_chs,
+                        &activation,
+                        &WorkingBufferSize,
+                        thread_pool);
+
+        auto* working_data = WorkingBufferSize > 0 ? alloc->Alloc(SafeInt<size_t>(sizeof(float)) * WorkingBufferSize)
+                                                : nullptr;
+        BufferUniquePtr working_buffer(working_data, BufferDeleter(alloc));
+
+        MlasConv(&Parameters,
+                Xdata,
+                weight,
+                bias,
+                static_cast<float*>(working_buffer.get()),
+                output_k,
+                thread_pool);
     }
 
 
