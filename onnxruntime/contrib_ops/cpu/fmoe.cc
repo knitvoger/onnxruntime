@@ -53,7 +53,7 @@ Status FMoE::Compute(OpKernelContext* context) const {
     const auto* input_num_expert = context->Input<Tensor>(3);
     const auto* input_top_k = context->Input<Tensor>(4);
     const auto* input_gate_index = context->Input<Tensor>(5);
-    const auto* input_gate_score = context->Input<Tensor>(6);
+    const auto* input_num_repeat = context->Input<Tensor>(6);
 
     // Dimensions
     int64_t sequence = X->Shape()[2];
@@ -67,11 +67,11 @@ Status FMoE::Compute(OpKernelContext* context) const {
     const int64_t num_expert = *(input_num_expert->template Data<int64_t>());
     const int64_t top_k = *(input_top_k->template Data<int64_t>());
     const int64_t *gate_index = input_gate_index->template Data<int64_t>();
-    const float *gate_score= input_gate_score->template Data<float>();
+    const int64_t num_repeat= *(input_num_repeat->template Data<int64_t>());
 
     //DumpCPU("onnx.input.txt", Xdata, 98*384, 384);
     // Output
-    std::vector<int64_t> Y_dims({X->Shape()[0], out_chs, sequence * 2});
+    std::vector<int64_t> Y_dims({X->Shape()[0], out_chs, num_repeat == 1 ? sequence * top_k : sequence});
     Tensor* Y = context->Output(0, Y_dims);
     float* Ydata = Y->template MutableData<float>();
     //memset(Ydata, 0, sizeof(float) * sequence * out_chs);
@@ -80,7 +80,7 @@ Status FMoE::Compute(OpKernelContext* context) const {
     ONNX_UNUSED_PARAMETER(Wdata);
     ONNX_UNUSED_PARAMETER(Bdata);
     ONNX_UNUSED_PARAMETER(gate_index);
-    ONNX_UNUSED_PARAMETER(gate_score);
+    ONNX_UNUSED_PARAMETER(num_repeat);
     ONNX_UNUSED_PARAMETER(sequence);
     ONNX_UNUSED_PARAMETER(in_chs);
     ONNX_UNUSED_PARAMETER(out_chs);
@@ -101,11 +101,12 @@ Status FMoE::Compute(OpKernelContext* context) const {
     std::vector<int64_t> dilations(1, 1);
     std::vector<int64_t> strides(1, 1);
 
-
     for (int64_t k = 0; k < top_k; k++)
     {
-        float *output_k = Ydata + k * sequence * out_chs;
-        const int64_t *gate_index_k = gate_index + k * sequence;
+        int64_t seq_k = num_repeat == 1 ? sequence : sequence / top_k;
+        const float *input_x = num_repeat == 1 ? Xdata : (Xdata + k * seq_k * in_chs);
+        float *output_k = Ydata + k * seq_k * out_chs;
+        const int64_t *gate_index_k = gate_index + k * seq_k;
         
         const float *weight = Wdata + gate_index_k[0] * in_chs * out_chs;
         const float *bias = Bdata + gate_index_k[0] * out_chs;
@@ -130,8 +131,8 @@ Status FMoE::Compute(OpKernelContext* context) const {
 
         MLAS_CONV_PARAMETERS Parameters;
         size_t WorkingBufferSize;
-        TensorShape input_shape = X->Shape().Slice(2);  // input seq
-        TensorShape output_shape = X->Shape().Slice(2); // output seq. Final output is input_seq * top_k
+        TensorShape input_shape = {seq_k}; //X->Shape().Slice(2);  // input seq
+        TensorShape output_shape = {seq_k}; //X->Shape().Slice(2); // output seq
         MlasConvPrepare(&Parameters,
                         1,
                         1,
@@ -153,7 +154,7 @@ Status FMoE::Compute(OpKernelContext* context) const {
         BufferUniquePtr working_buffer(working_data, BufferDeleter(alloc));
 
         MlasConv(&Parameters,
-                Xdata,
+                input_x,
                 weight,
                 bias,
                 static_cast<float*>(working_buffer.get()),
@@ -166,6 +167,8 @@ Status FMoE::Compute(OpKernelContext* context) const {
     
 
     //printf("num_expert %ld, top_k %ld\n", num_expert, top_k);
+    DumpCPU("cpp.input.txt", Xdata, in_chs * sequence, sequence);
+    DumpCPU("cpp.output.txt", Ydata, out_chs * Y_dims[2], Y_dims[2]);
 
     return Status::OK();
 }
