@@ -53,7 +53,8 @@ Status FMoE::Compute(OpKernelContext* context) const {
     const auto* input_num_expert = context->Input<Tensor>(3);
     const auto* input_top_k = context->Input<Tensor>(4);
     const auto* input_gate_index = context->Input<Tensor>(5);
-    const auto* input_num_repeat = context->Input<Tensor>(6);
+    const auto* input_gate_score = context->Input<Tensor>(6);
+    const auto* input_num_repeat = context->Input<Tensor>(7);
 
     // Dimensions
     int64_t sequence = X->Shape()[2];
@@ -67,6 +68,7 @@ Status FMoE::Compute(OpKernelContext* context) const {
     const int64_t num_expert = *(input_num_expert->template Data<int64_t>());
     const int64_t top_k = *(input_top_k->template Data<int64_t>());
     const int64_t *gate_index = input_gate_index->template Data<int64_t>();
+    const float *gate_score= input_gate_score->template Data<float>();
     const int64_t num_repeat= *(input_num_repeat->template Data<int64_t>());
 
     //DumpCPU("onnx.input.txt", Xdata, 98*384, 384);
@@ -85,6 +87,7 @@ Status FMoE::Compute(OpKernelContext* context) const {
     ONNX_UNUSED_PARAMETER(in_chs);
     ONNX_UNUSED_PARAMETER(out_chs);
     ONNX_UNUSED_PARAMETER(Ydata);
+    ONNX_UNUSED_PARAMETER(gate_score);
     ONNX_UNUSED_PARAMETER(num_expert);
 
     AllocatorPtr alloc;
