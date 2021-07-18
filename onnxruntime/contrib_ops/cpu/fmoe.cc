@@ -46,6 +46,73 @@ void DumpCPU(const char *file, const float *cpu_data, long size, long row)
 	fclose(pFile);
 }
 
+Status FMoE:: ExpertConv(OpKernelContext* context, const float *input, int64_t start_index, int64_t end_index, int64_t in_chs, int64_t out_chs, 
+                const float *Wdata, const float *Bdata, int64_t gate_index, float *output, concurrency::ThreadPool* thread_pool) const
+{
+    const float *weight = Wdata + gate_index * in_chs * out_chs;
+    const float *bias = Bdata + gate_index * out_chs;
+    /*for (int i = 0; i < sequence; i++)
+    {
+        const float *weight = Wdata + gate_index_k[0] * in_chs * out_chs;
+        const float *bias = Bdata + gate_index_k[0] * out_chs;
+        math::MatMul<float>(
+            sequence,
+            out_chs,
+            in_chs,
+            Xdata,
+            weight,
+            output_k,
+            thread_pool);
+
+        MlasActivation(&activation, output_k, bias, out_chs, sequence,  sequence);
+    }*/
+
+    MLAS_ACTIVATION activation;
+    activation.ActivationKind = MlasIdentityActivation;
+    std::vector<int64_t> kernel_shape(1, 1);
+    std::vector<int64_t> pads(2, 0);
+    std::vector<int64_t> dilations(1, 1);
+    std::vector<int64_t> strides(1, 1);
+
+    MLAS_CONV_PARAMETERS Parameters;
+    size_t WorkingBufferSize;
+    TensorShape input_shape = {end_index - start_index}; //X->Shape().Slice(2);  // input seq
+    TensorShape output_shape = {end_index - start_index}; //X->Shape().Slice(2); // output seq
+    MlasConvPrepare(&Parameters,
+                    1,
+                    1,
+                    1,
+                    in_chs,
+                    input_shape.GetDims().data(),
+                    kernel_shape.data(),
+                    dilations.data(),
+                    pads.data(),
+                    strides.data(),
+                    output_shape.GetDims().data(),
+                    out_chs,
+                    &activation,
+                    &WorkingBufferSize,
+                    thread_pool);
+
+    AllocatorPtr alloc;
+    ORT_RETURN_IF_ERROR(context->GetTempSpaceAllocator(&alloc));
+    auto* working_data = WorkingBufferSize > 0 ? alloc->Alloc(SafeInt<size_t>(sizeof(float)) * WorkingBufferSize)
+                                            : nullptr;
+    BufferUniquePtr working_buffer(working_data, BufferDeleter(alloc));
+
+    MlasConv(&Parameters,
+            input,
+            weight,
+            bias,
+            static_cast<float*>(working_buffer.get()),
+            output,
+            thread_pool);
+
+    return Status::OK();
+}
+
+
+
 Status FMoE::Compute(OpKernelContext* context) const {
     const auto* X = context->Input<Tensor>(0);
     const auto* W = context->Input<Tensor>(1);
@@ -90,19 +157,17 @@ Status FMoE::Compute(OpKernelContext* context) const {
     ONNX_UNUSED_PARAMETER(gate_score);
     ONNX_UNUSED_PARAMETER(num_expert);
 
-    AllocatorPtr alloc;
-    ORT_RETURN_IF_ERROR(context->GetTempSpaceAllocator(&alloc));
     /*auto* output_k_data = alloc->Alloc(SafeInt<size_t>(sizeof(float)) * sequence * top_k * out_chs);
     BufferUniquePtr output_k_buffer = BufferUniquePtr(output_k_data, BufferDeleter(alloc));
     float* output_k_buffer_data = static_cast<float*>(output_k_buffer.get());*/
 
     concurrency::ThreadPool* thread_pool = context->GetOperatorThreadPool();
-    MLAS_ACTIVATION activation;
+    /*MLAS_ACTIVATION activation;
     activation.ActivationKind = MlasIdentityActivation;
     std::vector<int64_t> kernel_shape(1, 1);
     std::vector<int64_t> pads(2, 0);
     std::vector<int64_t> dilations(1, 1);
-    std::vector<int64_t> strides(1, 1);
+    std::vector<int64_t> strides(1, 1);*/
 
     for (int64_t k = 0; k < top_k; k++)
     {
@@ -110,64 +175,24 @@ Status FMoE::Compute(OpKernelContext* context) const {
         const float *input_x = num_repeat == 1 ? Xdata : (Xdata + k * seq_k * in_chs);
         float *output_k = Ydata + k * seq_k * out_chs;
         const int64_t *gate_index_k = gate_index + k * seq_k;
-        
-        const float *weight = Wdata + gate_index_k[0] * in_chs * out_chs;
-        const float *bias = Bdata + gate_index_k[0] * out_chs;
-        ONNX_UNUSED_PARAMETER(output_k);
-        ONNX_UNUSED_PARAMETER(weight);
-        ONNX_UNUSED_PARAMETER(bias);
-        /*for (int i = 0; i < sequence; i++)
+
+        int64_t i = 0;
+        while(i < sequence)
         {
-            const float *weight = Wdata + gate_index_k[0] * in_chs * out_chs;
-            const float *bias = Bdata + gate_index_k[0] * out_chs;
-            math::MatMul<float>(
-                sequence,
-                out_chs,
-                in_chs,
-                Xdata,
-                weight,
-                output_k,
-                thread_pool);
-
-            MlasActivation(&activation, output_k, bias, out_chs, sequence,  sequence);
-        }*/
-
-        MLAS_CONV_PARAMETERS Parameters;
-        size_t WorkingBufferSize;
-        TensorShape input_shape = {seq_k}; //X->Shape().Slice(2);  // input seq
-        TensorShape output_shape = {seq_k}; //X->Shape().Slice(2); // output seq
-        MlasConvPrepare(&Parameters,
-                        1,
-                        1,
-                        1,
-                        in_chs,
-                        input_shape.GetDims().data(),
-                        kernel_shape.data(),
-                        dilations.data(),
-                        pads.data(),
-                        strides.data(),
-                        output_shape.GetDims().data(),
-                        out_chs,
-                        &activation,
-                        &WorkingBufferSize,
-                        thread_pool);
-
-        auto* working_data = WorkingBufferSize > 0 ? alloc->Alloc(SafeInt<size_t>(sizeof(float)) * WorkingBufferSize)
-                                                : nullptr;
-        BufferUniquePtr working_buffer(working_data, BufferDeleter(alloc));
-
-        MlasConv(&Parameters,
-                input_x,
-                weight,
-                bias,
-                static_cast<float*>(working_buffer.get()),
-                output_k,
-                thread_pool);
+            int64_t end_index = i + 1;
+            while(end_index < sequence && gate_index[i] == gate_index[end_index]){
+                end_index++;
+            }
+            
+            // conv for input[:, i:end_index]
+            this->ExpertConv(context, input_x + i * in_chs, i, end_index, in_chs, out_chs, Wdata, Bdata, gate_index_k[i], output_k + i * out_chs, thread_pool);
+            i = end_index;
+        }
+  
+        if (num_repeat == 0)
+            break;
+        
     }
-
-
-
-    
 
     //printf("num_expert %ld, top_k %ld\n", num_expert, top_k);
     DumpCPU("cpp.input.txt", Xdata, in_chs * sequence, sequence);
