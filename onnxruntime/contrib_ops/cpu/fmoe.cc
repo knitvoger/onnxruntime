@@ -199,9 +199,9 @@ Status FMoE::Compute(OpKernelContext* context) const {
         while(i < sequence)
         {
             int64_t end_index = i + 1;
-            /*while(end_index < sequence && gate_index[i] == gate_index[end_index]){
+            while(end_index < sequence && gate_index_k[i] == gate_index_k[end_index]){
                 end_index++;
-            }*/
+            }
             
             // conv for input[:, i:end_index]
             this->ExpertConv(context, input_x + i * in_chs, i, end_index, in_chs, out_chs, Wdata, Bdata, gate_index_k[i], output_k + i * out_chs, thread_pool);
@@ -213,9 +213,14 @@ Status FMoE::Compute(OpKernelContext* context) const {
         
     }
 
+    /*static int c = 0;
+    char file[1024];
+    sprintf(file, "fmoe_dump/input_%d.txt", c);
     //printf("num_expert %ld, top_k %ld\n", num_expert, top_k);
-    //DumpCPU("cpp.input.txt", Xdata, in_chs * sequence, in_chs);
-    //DumpCPU("cpp.output.txt", Ydata, Y_dims[0] * Y_dims[1], Y_dims[1]);
+    DumpCPU(file, Xdata, in_chs * sequence, in_chs);
+    sprintf(file, "fmoe_dump/output_%d.txt", c);
+    DumpCPU(file, Ydata, Y_dims[0] * Y_dims[1], Y_dims[1]);
+    c++;*/
 
     return Status::OK();
 }
