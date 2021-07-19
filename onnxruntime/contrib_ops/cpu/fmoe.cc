@@ -21,6 +21,7 @@
 #include "core/util/math_cpuonly.h"
 #include "core/util/math.h"
 #include "core/mlas/inc/mlas.h"
+#include "core/providers/cpu/math/gemm.h"
 
 namespace onnxruntime {
 namespace contrib {
@@ -46,68 +47,86 @@ void DumpCPU(const char *file, const float *cpu_data, long size, long row)
 	fclose(pFile);
 }
 
+static void GemmBroadcastBias(int64_t M, int64_t N, float beta,
+                              const float* c_data, const TensorShape* c_shape,
+                              float* y_data) {
+  // Broadcast the bias as needed if bias is given
+  if (beta != 0 && c_data != nullptr) {
+    ORT_ENFORCE(c_shape != nullptr, "c_shape is required if c_data is provided");
+    auto output_mat = EigenMatrixMapRowMajor<float>(y_data, M, N);
+    if (c_shape->Size() == 1) {
+      // C is (), (1,) or (1, 1), set the scalar
+      output_mat.setConstant(*c_data);
+    } else if (c_shape->NumDimensions() == 1 || (*c_shape)[0] == 1) {
+      // C is (N,) or (1, N)
+      output_mat.rowwise() = ConstEigenVectorMap<float>(c_data, N).transpose();
+    } else if ((*c_shape)[1] == 1) {
+      // C is (M, 1)
+      output_mat.colwise() = ConstEigenVectorMap<float>(c_data, M);
+    } else {
+      // C is (M, N), no broadcast needed.
+      output_mat = ConstEigenMatrixMapRowMajor<float>(c_data, M, N);
+    }
+  }
+}
+
+void ComputeGemm(CBLAS_TRANSPOSE trans_a, CBLAS_TRANSPOSE trans_b,
+                          int64_t M, int64_t N, int64_t K,
+                          float alpha,
+                          const float* a_data, const float* b_data,
+                          float beta,
+                          const float* c_data, const TensorShape* c_shape,
+                          float* y_data,
+                          concurrency::ThreadPool* thread_pool) {
+  // if input is empty tensor, return directly as nothing need to be calculated.
+  if (M == 0 || N == 0)
+    return;
+
+  // Broadcast the bias as needed if bias is given
+  GemmBroadcastBias(M, N, beta, c_data, c_shape, y_data);
+
+  math::Gemm<float>(trans_a, trans_b,
+                M, N, K,
+                alpha,
+                a_data,
+                b_data,
+                // ideally we need to set the output buffer contents to 0 if bias is missing,
+                // but passing 0 for beta is cheaper and it will ignore any junk in the output buffer
+                c_data != nullptr ? beta : 0,
+                y_data,
+                thread_pool);
+}
+
 Status FMoE:: ExpertConv(OpKernelContext* context, const float *input, int64_t start_index, int64_t end_index, int64_t in_chs, int64_t out_chs, 
                 const float *Wdata, const float *Bdata, int64_t gate_index, float *output, concurrency::ThreadPool* thread_pool) const
 {
     const float *weight = Wdata + gate_index * in_chs * out_chs;
     const float *bias = Bdata + gate_index * out_chs;
-    /*for (int i = 0; i < sequence; i++)
-    {
-        const float *weight = Wdata + gate_index_k[0] * in_chs * out_chs;
-        const float *bias = Bdata + gate_index_k[0] * out_chs;
-        math::MatMul<float>(
-            sequence,
-            out_chs,
-            in_chs,
-            Xdata,
-            weight,
-            output_k,
-            thread_pool);
-
-        MlasActivation(&activation, output_k, bias, out_chs, sequence,  sequence);
-    }*/
 
     MLAS_ACTIVATION activation;
     activation.ActivationKind = MlasIdentityActivation;
-    std::vector<int64_t> kernel_shape(1, 1);
-    std::vector<int64_t> pads(2, 0);
-    std::vector<int64_t> dilations(1, 1);
-    std::vector<int64_t> strides(1, 1);
 
-    MLAS_CONV_PARAMETERS Parameters;
-    size_t WorkingBufferSize;
-    TensorShape input_shape = {end_index - start_index}; //X->Shape().Slice(2);  // input seq
-    TensorShape output_shape = {end_index - start_index}; //X->Shape().Slice(2); // output seq
-    MlasConvPrepare(&Parameters,
-                    1,
-                    1,
-                    1,
-                    in_chs,
-                    input_shape.GetDims().data(),
-                    kernel_shape.data(),
-                    dilations.data(),
-                    pads.data(),
-                    strides.data(),
-                    output_shape.GetDims().data(),
-                    out_chs,
-                    &activation,
-                    &WorkingBufferSize,
-                    thread_pool);
+    /*math::MatMul<float>(
+        end_index - start_index,
+        out_chs,
+        in_chs,
+        input,
+        weight,
+        output,
+        thread_pool);*/
 
-    AllocatorPtr alloc;
-    ORT_RETURN_IF_ERROR(context->GetTempSpaceAllocator(&alloc));
-    auto* working_data = WorkingBufferSize > 0 ? alloc->Alloc(SafeInt<size_t>(sizeof(float)) * WorkingBufferSize)
-                                            : nullptr;
-    BufferUniquePtr working_buffer(working_data, BufferDeleter(alloc));
+    int64_t M = end_index - start_index;
+    int64_t N = out_chs;
+    int64_t K = in_chs;
+    TensorShape bias_shape = {N};
+    //MlasGemm(CblasNoTrans, CblasTrans, M, N, K, 1.f, input, K, weight, K, 0.f, output, N, thread_pool);
+    //MlasActivation(&activation, output, bias, out_chs, end_index - start_index,  end_index - start_index);
 
-    MlasConv(&Parameters,
-            input,
-            weight,
-            bias,
-            static_cast<float*>(working_buffer.get()),
-            output,
-            thread_pool);
+    ComputeGemm(CblasNoTrans, CblasTrans, M, N, K, 1.0, input, weight, 1.0,
+                bias, &bias_shape, output, thread_pool);
 
+    ONNX_UNUSED_PARAMETER(bias);
+    ONNX_UNUSED_PARAMETER(activation);
     return Status::OK();
 }
 
@@ -124,7 +143,7 @@ Status FMoE::Compute(OpKernelContext* context) const {
     const auto* input_num_repeat = context->Input<Tensor>(7);
 
     // Dimensions
-    int64_t sequence = X->Shape()[2];
+    int64_t sequence = X->Shape()[0];
     int64_t in_chs = X->Shape()[1];
     int64_t out_chs = W->Shape()[1];
 
@@ -140,7 +159,7 @@ Status FMoE::Compute(OpKernelContext* context) const {
 
     //DumpCPU("onnx.input.txt", Xdata, 98*384, 384);
     // Output
-    std::vector<int64_t> Y_dims({X->Shape()[0], out_chs, num_repeat == 1 ? sequence * top_k : sequence});
+    std::vector<int64_t> Y_dims({num_repeat == 1 ? sequence * top_k : sequence, out_chs});
     Tensor* Y = context->Output(0, Y_dims);
     float* Ydata = Y->template MutableData<float>();
     //memset(Ydata, 0, sizeof(float) * sequence * out_chs);
@@ -180,9 +199,9 @@ Status FMoE::Compute(OpKernelContext* context) const {
         while(i < sequence)
         {
             int64_t end_index = i + 1;
-            while(end_index < sequence && gate_index[i] == gate_index[end_index]){
+            /*while(end_index < sequence && gate_index[i] == gate_index[end_index]){
                 end_index++;
-            }
+            }*/
             
             // conv for input[:, i:end_index]
             this->ExpertConv(context, input_x + i * in_chs, i, end_index, in_chs, out_chs, Wdata, Bdata, gate_index_k[i], output_k + i * out_chs, thread_pool);
@@ -195,8 +214,8 @@ Status FMoE::Compute(OpKernelContext* context) const {
     }
 
     //printf("num_expert %ld, top_k %ld\n", num_expert, top_k);
-    DumpCPU("cpp.input.txt", Xdata, in_chs * sequence, sequence);
-    DumpCPU("cpp.output.txt", Ydata, out_chs * Y_dims[2], Y_dims[2]);
+    //DumpCPU("cpp.input.txt", Xdata, in_chs * sequence, in_chs);
+    //DumpCPU("cpp.output.txt", Ydata, Y_dims[0] * Y_dims[1], Y_dims[1]);
 
     return Status::OK();
 }
