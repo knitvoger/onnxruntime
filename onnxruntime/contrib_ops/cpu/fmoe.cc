@@ -130,8 +130,6 @@ Status FMoE:: ExpertConv(OpKernelContext* context, const float *input, int64_t s
     return Status::OK();
 }
 
-
-
 Status FMoE::Compute(OpKernelContext* context) const {
     const auto* X = context->Input<Tensor>(0);
     const auto* W = context->Input<Tensor>(1);
@@ -176,19 +174,10 @@ Status FMoE::Compute(OpKernelContext* context) const {
     ONNX_UNUSED_PARAMETER(gate_score);
     ONNX_UNUSED_PARAMETER(num_expert);
 
-    /*auto* output_k_data = alloc->Alloc(SafeInt<size_t>(sizeof(float)) * sequence * top_k * out_chs);
-    BufferUniquePtr output_k_buffer = BufferUniquePtr(output_k_data, BufferDeleter(alloc));
-    float* output_k_buffer_data = static_cast<float*>(output_k_buffer.get());*/
-
     concurrency::ThreadPool* thread_pool = context->GetOperatorThreadPool();
-    /*MLAS_ACTIVATION activation;
-    activation.ActivationKind = MlasIdentityActivation;
-    std::vector<int64_t> kernel_shape(1, 1);
-    std::vector<int64_t> pads(2, 0);
-    std::vector<int64_t> dilations(1, 1);
-    std::vector<int64_t> strides(1, 1);*/
 
-    for (int64_t k = 0; k < top_k; k++)
+    // phones one by one
+    /*for (int64_t k = 0; k < top_k; k++)
     {
         int64_t seq_k = num_repeat == 1 ? sequence : sequence / top_k;
         const float *input_x = num_repeat == 1 ? Xdata : (Xdata + k * seq_k * in_chs);
@@ -209,8 +198,42 @@ Status FMoE::Compute(OpKernelContext* context) const {
         }
   
         if (num_repeat == 0)
-            break;
-        
+            break; 
+    }*/
+
+    // phones with same expert
+    for (int64_t k = 0; k < top_k; k++)
+    {
+        int64_t seq_k = num_repeat == 1 ? sequence : sequence / top_k;
+        const float *input_x = num_repeat == 1 ? Xdata : (Xdata + k * seq_k * in_chs);
+        float *output_k = Ydata + k * seq_k * out_chs;
+        const int64_t *gate_index_k = gate_index + k * seq_k;
+
+        std::set<int64_t> unique_gates;
+        for (int i = 0; i < sequence; i++)
+            unique_gates.insert(gate_index_k[i]);
+
+        for (auto it = unique_gates.begin(); it != unique_gates.end(); ++it)
+        {
+            int64_t gate_to_process = *it;
+            for (int64_t i =0; i < sequence; i++)
+            {
+                if (gate_index_k[i] != gate_to_process)
+                    continue;
+
+                int64_t end_index = i + 1;  
+                while(end_index < sequence && gate_index_k[i] == gate_index_k[end_index]){
+                    end_index++;
+                }
+                
+                // conv for input[:, i:end_index]
+                this->ExpertConv(context, input_x + i * in_chs, i, end_index, in_chs, out_chs, Wdata, Bdata, gate_index_k[i], output_k + i * out_chs, thread_pool);
+                i = end_index;
+            }
+        }
+  
+        if (num_repeat == 0)
+            break; 
     }
 
     /*static int c = 0;
