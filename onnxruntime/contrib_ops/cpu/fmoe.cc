@@ -264,7 +264,7 @@ Status FMoE::Compute(OpKernelContext* context) const {
             }
 
             // run experts with small input (< threshold)
-            const int64_t ThreadPerGemm = 2;
+            /*const int64_t ThreadPerGemm = 2;
             MlasTrySimpleParallel(thread_pool, 
                 ThreadPerGemm * static_cast<ptrdiff_t>(expert_run_params.size()), 
                 [=](ptrdiff_t tid)
@@ -274,7 +274,9 @@ Status FMoE::Compute(OpKernelContext* context) const {
                 MlasSgemmThreaded(1, 2, TransA, TransB, 
                     expert_run_params[GemmIdx].M, expert_run_params[GemmIdx].N, expert_run_params[GemmIdx].K, 
                     &(expert_run_params[GemmIdx]), ThreadIdx);
-            });
+            });*/
+            if (expert_run_params.size() > 0)
+                MlasGemmBatch(TransA, TransB, expert_run_params, thread_pool);
         }
   
         if (num_repeat == 0)

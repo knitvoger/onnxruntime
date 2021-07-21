@@ -20,6 +20,7 @@ Abstract:
 #include <cstddef>
 #include <cstdlib>
 #include <cstdint>
+#include <vector>
 
 //
 // Define the calling convention for Windows targets.
@@ -197,6 +198,15 @@ MlasGemmBatch(
     size_t K,
     const MLAS_SGEMM_DATA_PARAMS* Data,
     size_t BatchSize,
+    MLAS_THREADPOOL* ThreadPool
+    );
+
+void
+MLASCALL
+MlasGemmBatch(
+    CBLAS_TRANSPOSE TransA,
+    CBLAS_TRANSPOSE TransB,
+    std::vector<Expert_Run_Parameter> params,
     MLAS_THREADPOOL* ThreadPool
     );
 

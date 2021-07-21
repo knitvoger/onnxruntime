@@ -1558,6 +1558,28 @@ MLASCALL
 MlasGemmBatch(
     CBLAS_TRANSPOSE TransA,
     CBLAS_TRANSPOSE TransB,
+    std::vector<Expert_Run_Parameter> params,
+    MLAS_THREADPOOL* ThreadPool
+    )
+{
+    const int64_t ThreadPerGemm = 2;
+    MlasTrySimpleParallel(ThreadPool, 
+        ThreadPerGemm * static_cast<ptrdiff_t>(params.size()), 
+        [=](ptrdiff_t tid)
+    {
+        ptrdiff_t GemmIdx = tid / ThreadPerGemm;
+        ptrdiff_t ThreadIdx = tid % ThreadPerGemm;
+        MlasSgemmThreaded(1, 2, TransA, TransB, 
+            params[GemmIdx].M, params[GemmIdx].N, params[GemmIdx].K, 
+            &(params[GemmIdx].mlas_params), ThreadIdx);
+    });
+}
+
+void
+MLASCALL
+MlasGemmBatch(
+    CBLAS_TRANSPOSE TransA,
+    CBLAS_TRANSPOSE TransB,
     size_t M,
     size_t N,
     size_t K,
