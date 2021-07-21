@@ -256,7 +256,10 @@ Status FMoE::Compute(OpKernelContext* context) const {
                     param.M = M;
                     param.N = N;
                     param.K = K;
+                    param.bias = Bdata + gate_index_k[i] * out_chs;
 
+                    TensorShape bias_shape = {N};
+                    GemmBroadcastBias(M, N, 1.0, param.bias , &bias_shape, param.mlas_params.C);
                     expert_run_params.push_back(param);
                 }   
                 total_processed += end_index - i;

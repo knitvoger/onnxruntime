@@ -16,6 +16,7 @@ Abstract:
 --*/
 
 #include "mlasi.h"
+#include "core/common/common.h"
 
 //
 // Define the number of rows from matrix A to transpose to a local buffer.
@@ -1452,6 +1453,26 @@ Return Value:
         }
     }
 }
+
+/*void
+MlasSgemmThreaded(
+    float *bias,
+    const ptrdiff_t ThreadCountM,
+    const ptrdiff_t ThreadCountN,
+    const CBLAS_TRANSPOSE TransA,
+    const CBLAS_TRANSPOSE TransB,
+    const size_t M,
+    const size_t N,
+    const size_t K,
+
+    const MLAS_SGEMM_DATA_PARAMS* DataParams,
+    ptrdiff_t ThreadId
+    )
+ {
+     std::vector<size_t> shape = {N};
+     GemmBroadcastBias(M, N, 1.0, bias, &shape, DataParams->C);
+     MlasSgemmThreaded(ThreadCountM, ThreadCountN, TransA, TransB, M, N, K, DataParams, ThreadId);
+ }*/   
 
 void
 MlasSgemmThreaded(

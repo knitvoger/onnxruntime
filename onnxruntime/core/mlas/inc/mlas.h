@@ -172,6 +172,7 @@ struct Expert_Run_Parameter {
     int64_t M;
     int64_t N;
     int64_t K;
+    const float *bias;
 };
 
 /**
