@@ -202,6 +202,13 @@ Status FMoE::Compute(OpKernelContext* context) const {
     }*/
 
     // phones with same expert
+    int64_t total_processed = 0;
+    int64_t threshold = 12;
+    std::vector<Expert_Run_Parameter> expert_run_params;
+    int64_t N = out_chs;
+    int64_t K = in_chs;
+    CBLAS_TRANSPOSE TransA = CblasNoTrans;
+    CBLAS_TRANSPOSE TransB = CblasTrans;
     for (int64_t k = 0; k < top_k; k++)
     {
         int64_t seq_k = num_repeat == 1 ? sequence : sequence / top_k;
@@ -215,6 +222,7 @@ Status FMoE::Compute(OpKernelContext* context) const {
 
         for (auto it = unique_gates.begin(); it != unique_gates.end(); ++it)
         {
+            expert_run_params.clear();
             int64_t gate_to_process = *it;
             for (int64_t i =0; i < sequence; i++)
             {
@@ -227,13 +235,55 @@ Status FMoE::Compute(OpKernelContext* context) const {
                 }
                 
                 // conv for input[:, i:end_index]
-                this->ExpertConv(context, input_x + i * in_chs, i, end_index, in_chs, out_chs, Wdata, Bdata, gate_index_k[i], output_k + i * out_chs, thread_pool);
+                if (end_index - i >= threshold){
+                    this->ExpertConv(context, input_x + i * in_chs, i, end_index, in_chs, out_chs, Wdata, Bdata, gate_index_k[i], output_k + i * out_chs, thread_pool);
+                }
+                else{
+                    int64_t M = end_index - i;
+                    int lda = static_cast<int>((TransA == CblasNoTrans) ? K : M);
+                    int ldb = static_cast<int>((TransB == CblasNoTrans) ? N : K);
+
+                    Expert_Run_Parameter param;
+                    param.mlas_params.A = input_x + i * in_chs;
+                    param.mlas_params.alpha = 1.0;
+                    param.mlas_params.B = Wdata + gate_index_k[i] * in_chs * out_chs;
+                    param.mlas_params.beta = 1.0;
+                    param.mlas_params.BIsPacked = false;
+                    param.mlas_params.C = output_k + i * out_chs;
+                    param.mlas_params.lda = lda;
+                    param.mlas_params.ldb = ldb;
+                    param.mlas_params.ldc = N;
+                    param.M = M;
+                    param.N = N;
+                    param.K = K;
+
+                    expert_run_params.push_back(param);
+                }   
+                total_processed += end_index - i;
                 i = end_index;
             }
+
+            // run experts with small input (< threshold)
+            const int64_t ThreadPerGemm = 2;
+            MlasTrySimpleParallel(thread_pool, 
+                ThreadPerGemm * static_cast<ptrdiff_t>(expert_run_params.size()), 
+                [=](ptrdiff_t tid)
+            {
+                ptrdiff_t GemmIdx = tid / ThreadPerGemm;
+                ptrdiff_t ThreadIdx = tid % ThreadPerGemm;
+                MlasSgemmThreaded(1, 2, TransA, TransB, 
+                    expert_run_params[GemmIdx].M, expert_run_params[GemmIdx].N, expert_run_params[GemmIdx].K, 
+                    &(expert_run_params[GemmIdx]), ThreadIdx);
+            });
         }
   
         if (num_repeat == 0)
             break; 
+    }
+
+    if (total_processed != Y_dims[0]){
+        printf("Unexpected!!!\n");
+        exit(0);
     }
 
     /*static int c = 0;

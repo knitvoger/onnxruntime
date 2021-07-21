@@ -166,6 +166,13 @@ struct MLAS_SGEMM_DATA_PARAMS {
     bool BIsPacked = false;   /**< Whether B is pre-packed */
 };
 
+struct Expert_Run_Parameter {
+    MLAS_SGEMM_DATA_PARAMS mlas_params;
+    int64_t M;
+    int64_t N;
+    int64_t K;
+};
+
 /**
  * @brief  Batched single precision matrix/matrix multiply operation (SGEMM)
  *

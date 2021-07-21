@@ -6,6 +6,8 @@
 #include "core/common/common.h"
 #include "core/framework/op_kernel.h"
 #include "core/framework/tensor.h"
+#include "core/mlas/inc/mlas.h"
+#include "core/mlas/lib/mlasi.h"
 
 namespace onnxruntime {
 namespace concurrency {
