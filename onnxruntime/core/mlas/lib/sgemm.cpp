@@ -1583,14 +1583,16 @@ MlasGemmBatch(
     MLAS_THREADPOOL* ThreadPool
     )
 {
-    const int64_t ThreadPerGemm = 2;
+    const int64_t ThreadM = 1;
+    const int64_t ThreadN = 2;
+    const int64_t ThreadPerGemm = ThreadM * ThreadN;
     MlasTrySimpleParallel(ThreadPool, 
         ThreadPerGemm * static_cast<ptrdiff_t>(params.size()), 
         [=](ptrdiff_t tid)
     {
         ptrdiff_t GemmIdx = tid / ThreadPerGemm;
         ptrdiff_t ThreadIdx = tid % ThreadPerGemm;
-        MlasSgemmThreaded(1, 2, TransA, TransB, 
+        MlasSgemmThreaded(ThreadM, ThreadN, TransA, TransB, 
             params[GemmIdx].M, params[GemmIdx].N, params[GemmIdx].K, 
             &(params[GemmIdx].mlas_params), ThreadIdx);
     });
