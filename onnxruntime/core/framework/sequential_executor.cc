@@ -314,12 +314,12 @@ Status SequentialExecutor::Execute(const SessionState& session_state, const std:
 #endif
 
         //compute_status = p_op_kernel->Compute(&op_kernel_context);
-        auto start_time = std::chrono::system_clock::now();
-        if (p_op_kernel->Node().Name().find("Clip_367") != std::string::npos)
-            start_time = std::chrono::system_clock::now(); 
+        //auto start_time = std::chrono::system_clock::now();
+        //if (p_op_kernel->Node().Name().find("Clip_367") != std::string::npos)
+        //    start_time = std::chrono::system_clock::now(); 
         compute_status = p_op_kernel->Compute(&op_kernel_context);
-        auto end_time = std::chrono::system_clock::now();
-        auto infer_duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+        //auto end_time = std::chrono::system_clock::now();
+        //auto infer_duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
       }
       ORT_CATCH(const std::exception& ex) {
         ORT_HANDLE_EXCEPTION([&]() {
