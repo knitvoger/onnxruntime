@@ -66,12 +66,17 @@ Status FMoE::ComputeInternal(OpKernelContext* context) const {
     const float *Xdata = X->template Data<float>();
     const float *Wdata = W->template Data<float>();
     const float *Bdata = B->template Data<float>();
-    const int64_t num_expert = *(input_num_expert->template Data<int64_t>());
-    const int64_t top_k = *(input_top_k->template Data<int64_t>());
-    const int64_t *gate_index = input_gate_index->template Data<int64_t>();
-    const float *gate_score= input_gate_score->template Data<float>();
-    const int64_t num_repeat= *(input_num_repeat->template Data<int64_t>());
+    // const int64_t num_expert = *(input_num_expert->template Data<int64_t>());
+    // const int64_t top_k = *(input_top_k->template Data<int64_t>());
+    // const int64_t num_repeat = *(input_num_repeat->template Data<int64_t>());
+    cudaMemcpyAsync(const_cast<int64_t*>(&num_expert), input_num_expert->template Data<int64_t>(), sizeof(int64_t), cudaMemcpyDeviceToHost, nullptr);
+    cudaMemcpyAsync(const_cast<int64_t*>(&top_k), input_top_k->template Data<int64_t>(), sizeof(int64_t), cudaMemcpyDeviceToHost, nullptr);
+    cudaMemcpyAsync(const_cast<int64_t*>(&num_repeat), input_num_repeat->template Data<int64_t>(), sizeof(int64_t), cudaMemcpyDeviceToHost, nullptr);
+    
 
+    cudaMemcpyAsync(const_cast<int64_t*>(gate_index), input_gate_index->template Data<int64_t>(), sizeof(int64_t) * sequence * top_k, cudaMemcpyDeviceToHost, nullptr);
+    cudaMemcpyAsync(const_cast<float*>(gate_score), input_gate_score->template Data<float>(), sizeof(float) * sequence * top_k, cudaMemcpyDeviceToHost, nullptr);
+    
     //DumpCPU("onnx.input.txt", Xdata, 98*384, 384);
     // Output
     std::vector<int64_t> Y_dims({num_repeat == 1 ? sequence * top_k : sequence, out_chs});
@@ -90,6 +95,9 @@ Status FMoE::ComputeInternal(OpKernelContext* context) const {
     ONNX_UNUSED_PARAMETER(Ydata);
     ONNX_UNUSED_PARAMETER(gate_score);
     ONNX_UNUSED_PARAMETER(num_expert);
+    ONNX_UNUSED_PARAMETER(input_num_expert);
+    ONNX_UNUSED_PARAMETER(input_top_k);
+    ONNX_UNUSED_PARAMETER(input_num_repeat);
 
 
 
@@ -115,6 +123,7 @@ Status FMoE::ComputeInternal(OpKernelContext* context) const {
         {
             //expert_run_params.clear();
             int64_t gate_to_process = *it;
+            printf("gate_to_process %ld\n", gate_to_process);
             for (int64_t i =0; i < sequence; i++)
             {
                 if (gate_index_k[i] != gate_to_process)
