@@ -131,9 +131,9 @@ Status FMoE::ComputeInternal(OpKernelContext* context) const {
     cudaMemcpyAsync(const_cast<int64_t*>(&top_k), input_top_k->template Data<int64_t>(), sizeof(int64_t), cudaMemcpyDeviceToHost, nullptr);
     cudaMemcpyAsync(const_cast<int64_t*>(&num_repeat), input_num_repeat->template Data<int64_t>(), sizeof(int64_t), cudaMemcpyDeviceToHost, nullptr);
     
-
-    cudaMemcpyAsync(const_cast<int64_t*>(gate_index), input_gate_index->template Data<int64_t>(), sizeof(int64_t) * sequence * top_k, cudaMemcpyDeviceToHost, nullptr);
-    cudaMemcpyAsync(const_cast<float*>(gate_score), input_gate_score->template Data<float>(), sizeof(float) * sequence * top_k, cudaMemcpyDeviceToHost, nullptr);
+    int64_t gate_size = input_gate_index->Shape()[0] * input_gate_index->Shape()[1];
+    cudaMemcpyAsync(const_cast<int64_t*>(gate_index), input_gate_index->template Data<int64_t>(), sizeof(int64_t) * gate_size, cudaMemcpyDeviceToHost, nullptr);
+    cudaMemcpyAsync(const_cast<float*>(gate_score), input_gate_score->template Data<float>(), sizeof(float) * gate_size, cudaMemcpyDeviceToHost, nullptr);
 
     //printf("sequence %ld, num_expert %ld, top_k %ld, num_repeat %ld\n", sequence, num_expert, top_k, num_repeat);
     std::vector<int64_t> Y_dims({num_repeat == 1 ? sequence * top_k : sequence, out_chs});
