@@ -20,6 +20,8 @@ class FMoE final : public onnxruntime::cuda::CudaKernel {
   explicit FMoE(const OpKernelInfo& info) : onnxruntime::cuda::CudaKernel (info) {
       gate_index = (int64_t *)malloc(sizeof(int64_t) * MAX_SEQ_LENGTH);
       gate_score = (float *)malloc(sizeof(float) * MAX_SEQ_LENGTH);
+      trans_A_ = false;
+      trans_B_ = true;
   }
 
   Status ComputeInternal(OpKernelContext* context) const override;
@@ -32,6 +34,8 @@ class FMoE final : public onnxruntime::cuda::CudaKernel {
   int64_t num_repeat = 1;
   int64_t *gate_index = nullptr;
   float *gate_score= nullptr;
+  bool trans_A_;
+  bool trans_B_;
 };
 
 }

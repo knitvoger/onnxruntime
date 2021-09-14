@@ -16,12 +16,17 @@
 /* Modifications Copyright (c) Microsoft. */
 
 #include "fmoe.h"
-
+#include "core/providers/cuda/math/gemm.h"
+#include "core/providers/cpu/math/gemm_helper.h"
+#include "core/providers/cuda/cuda_common.h"
+#include "core/providers/cuda/shared_inc/fpgeneric.h"
 
 #define ONNX_UNUSED_PARAMETER(x) (void)(x)
 namespace onnxruntime {
 namespace contrib {
 namespace cuda {
+
+typedef typename onnxruntime::cuda::ToCudaType<float>::MappedType CudaT;
 
 Status FMoE:: ExpertConv(OpKernelContext* context, const float *input, int64_t start_index, int64_t end_index, int64_t in_chs, int64_t out_chs, 
                 const float *Wdata, const float *Bdata, int64_t gate_index, float *output) const
@@ -34,6 +39,38 @@ Status FMoE:: ExpertConv(OpKernelContext* context, const float *input, int64_t s
     int64_t K = in_chs;
     TensorShape bias_shape = {N};
 
+    auto one = onnxruntime::cuda::ToCudaType<float>::FromFloat(1.0f);
+    auto zero = onnxruntime::cuda::ToCudaType<float>::FromFloat(0.0f);
+    auto& device_prop = GetDeviceProp();
+
+    // broadcast bias
+    CUBLAS_RETURN_IF_ERROR(cublasGemmHelper(
+        CublasHandle(),
+        CUBLAS_OP_N,
+        CUBLAS_OP_N,
+        N, M, 1,
+        /*alpha*/ &one,
+        bias, N,
+        GetConstOnes<CudaT>(M), 1,
+        /*beta*/ &zero,
+        output, N, device_prop));
+
+    CudaT alpha = ToCudaType<float>::FromFloat(1.0);
+    CudaT beta = ToCudaType<float>::FromFloat(1.0);
+    CUBLAS_RETURN_IF_ERROR(cublasGemmHelper(
+      CublasHandle(),
+      trans_B_ ? CUBLAS_OP_T : CUBLAS_OP_N,
+      trans_A_ ? CUBLAS_OP_T : CUBLAS_OP_N,
+      N, M, K,
+      &alpha,
+      reinterpret_cast<const CudaT*>(weight),
+      (trans_B_ ? K : N),
+      reinterpret_cast<const CudaT*>(input),
+      (trans_A_ ? M : K),
+      // ideally we need to set the output buffer contents to 0 if bias is missing,
+      // but passing 0 for beta is cheaper and it will ignore any junk in the output buffer
+      bias != nullptr ? &beta : &zero,
+      output, N, device_prop));
 
     ONNX_UNUSED_PARAMETER(context);
     ONNX_UNUSED_PARAMETER(input);
@@ -123,7 +160,7 @@ Status FMoE::ComputeInternal(OpKernelContext* context) const {
         {
             //expert_run_params.clear();
             int64_t gate_to_process = *it;
-            printf("gate_to_process %ld\n", gate_to_process);
+            //printf("gate_to_process %ld\n", gate_to_process);
             for (int64_t i =0; i < sequence; i++)
             {
                 if (gate_index_k[i] != gate_to_process)
@@ -139,6 +176,8 @@ Status FMoE::ComputeInternal(OpKernelContext* context) const {
             }
         }
   
+        ONNX_UNUSED_PARAMETER(input_x);
+        ONNX_UNUSED_PARAMETER(output_k);
         if (num_repeat == 0)
             break; 
     }
