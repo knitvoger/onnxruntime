@@ -20,6 +20,7 @@
 #include "core/providers/cpu/math/gemm_helper.h"
 #include "core/providers/cuda/cuda_common.h"
 #include "core/providers/cuda/shared_inc/fpgeneric.h"
+#include <chrono>
 
 #define ONNX_UNUSED_PARAMETER(x) (void)(x)
 namespace onnxruntime {
@@ -27,10 +28,12 @@ namespace contrib {
 namespace cuda {
 
 typedef typename onnxruntime::cuda::ToCudaType<float>::MappedType CudaT;
+static float gemm_total_cost = 0;
 
 Status FMoE:: ExpertConv(OpKernelContext* context, const float *input, int64_t start_index, int64_t end_index, int64_t in_chs, int64_t out_chs, 
                 const float *Wdata, const float *Bdata, int64_t gate_index, float *output) const
 {
+    //auto start_time = std::chrono::system_clock::now();
     const float *weight = Wdata + gate_index * in_chs * out_chs;
     const float *bias = Bdata + gate_index * out_chs;
 
@@ -38,25 +41,29 @@ Status FMoE:: ExpertConv(OpKernelContext* context, const float *input, int64_t s
     int64_t N = out_chs;
     int64_t K = in_chs;
     TensorShape bias_shape = {N};
+    
 
     auto one = onnxruntime::cuda::ToCudaType<float>::FromFloat(1.0f);
     auto zero = onnxruntime::cuda::ToCudaType<float>::FromFloat(0.0f);
     auto& device_prop = GetDeviceProp();
 
     // broadcast bias
+    
     CUBLAS_RETURN_IF_ERROR(cublasGemmHelper(
         CublasHandle(),
         CUBLAS_OP_N,
         CUBLAS_OP_N,
         N, M, 1,
-        /*alpha*/ &one,
+        &one,
         bias, N,
         GetConstOnes<CudaT>(M), 1,
-        /*beta*/ &zero,
+        &zero,
         output, N, device_prop));
 
     CudaT alpha = ToCudaType<float>::FromFloat(1.0);
     CudaT beta = ToCudaType<float>::FromFloat(1.0);
+    
+    
     CUBLAS_RETURN_IF_ERROR(cublasGemmHelper(
       CublasHandle(),
       trans_B_ ? CUBLAS_OP_T : CUBLAS_OP_N,
@@ -71,6 +78,11 @@ Status FMoE:: ExpertConv(OpKernelContext* context, const float *input, int64_t s
       // but passing 0 for beta is cheaper and it will ignore any junk in the output buffer
       bias != nullptr ? &beta : &zero,
       output, N, device_prop));
+    //auto end_time = std::chrono::system_clock::now();
+    //auto infer_duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+    //printf("cublasGemmHelper cost %.3f ms\n", infer_duration.count() / 1000.0);
+    
+
 
     ONNX_UNUSED_PARAMETER(context);
     ONNX_UNUSED_PARAMETER(input);
@@ -81,10 +93,19 @@ Status FMoE:: ExpertConv(OpKernelContext* context, const float *input, int64_t s
     ONNX_UNUSED_PARAMETER(N);
     ONNX_UNUSED_PARAMETER(K);
     ONNX_UNUSED_PARAMETER(bias_shape);
+    ONNX_UNUSED_PARAMETER(one);
+    ONNX_UNUSED_PARAMETER(zero);
+    ONNX_UNUSED_PARAMETER(device_prop);
+    ONNX_UNUSED_PARAMETER(alpha);
+    ONNX_UNUSED_PARAMETER(beta);
+    //gemm_total_cost += infer_duration.count() / 1000.0;
     return Status::OK();
 }
 
 Status FMoE::ComputeInternal(OpKernelContext* context) const {
+    gemm_total_cost = 0;
+    //int64_t gemm_count = 0;
+    //auto start_time = std::chrono::system_clock::now();
     const auto* X = context->Input<Tensor>(0);
     const auto* W = context->Input<Tensor>(1);
     const auto* B = context->Input<Tensor>(2);
@@ -154,6 +175,9 @@ Status FMoE::ComputeInternal(OpKernelContext* context) const {
                 
                 // conv for input[:, i:end_index]
                 this->ExpertConv(context, input_x + i * in_chs, i, end_index, in_chs, out_chs, Wdata, Bdata, gate_index_k[i], output_k + i * out_chs);
+                //gemm_count++;
+                total_processed += end_index - i;
+                i = end_index;
             }
         }
   
@@ -162,6 +186,12 @@ Status FMoE::ComputeInternal(OpKernelContext* context) const {
         if (num_repeat == 0)
             break; 
     }
+
+    /*printf("gemm_total_cost %.3f\n", gemm_total_cost);
+    auto end_time = std::chrono::system_clock::now();
+    auto infer_duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
+    printf("fmoe cost  %.3f\n", infer_duration.count() / 1000.0);
+    printf("seq %ld, gemm_count %ld\n", sequence, gemm_count);*/
 
     ONNX_UNUSED_PARAMETER(total_processed);
     ONNX_UNUSED_PARAMETER(threshold);
