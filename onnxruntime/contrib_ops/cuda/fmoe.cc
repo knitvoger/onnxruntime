@@ -113,30 +113,11 @@ Status FMoE::ComputeInternal(OpKernelContext* context) const {
 
     cudaMemcpyAsync(const_cast<int64_t*>(gate_index), input_gate_index->template Data<int64_t>(), sizeof(int64_t) * sequence * top_k, cudaMemcpyDeviceToHost, nullptr);
     cudaMemcpyAsync(const_cast<float*>(gate_score), input_gate_score->template Data<float>(), sizeof(float) * sequence * top_k, cudaMemcpyDeviceToHost, nullptr);
-    
-    //DumpCPU("onnx.input.txt", Xdata, 98*384, 384);
-    // Output
+
+    //printf("sequence %ld, num_expert %ld, top_k %ld, num_repeat %ld\n", sequence, num_expert, top_k, num_repeat);
     std::vector<int64_t> Y_dims({num_repeat == 1 ? sequence * top_k : sequence, out_chs});
     Tensor* Y = context->Output(0, Y_dims);
     float* Ydata = Y->template MutableData<float>();
-    //memset(Ydata, 0, sizeof(float) * sequence * out_chs);
-
-    ONNX_UNUSED_PARAMETER(Xdata);
-    ONNX_UNUSED_PARAMETER(Wdata);
-    ONNX_UNUSED_PARAMETER(Bdata);
-    ONNX_UNUSED_PARAMETER(gate_index);
-    ONNX_UNUSED_PARAMETER(num_repeat);
-    ONNX_UNUSED_PARAMETER(sequence);
-    ONNX_UNUSED_PARAMETER(in_chs);
-    ONNX_UNUSED_PARAMETER(out_chs);
-    ONNX_UNUSED_PARAMETER(Ydata);
-    ONNX_UNUSED_PARAMETER(gate_score);
-    ONNX_UNUSED_PARAMETER(num_expert);
-    ONNX_UNUSED_PARAMETER(input_num_expert);
-    ONNX_UNUSED_PARAMETER(input_top_k);
-    ONNX_UNUSED_PARAMETER(input_num_repeat);
-
-
 
     int64_t total_processed = 0;
     int64_t threshold = 12;
@@ -188,6 +169,20 @@ Status FMoE::ComputeInternal(OpKernelContext* context) const {
     ONNX_UNUSED_PARAMETER(K);
     ONNX_UNUSED_PARAMETER(TransA);
     ONNX_UNUSED_PARAMETER(TransB);
+    ONNX_UNUSED_PARAMETER(Xdata);
+    ONNX_UNUSED_PARAMETER(Wdata);
+    ONNX_UNUSED_PARAMETER(Bdata);
+    ONNX_UNUSED_PARAMETER(gate_index);
+    ONNX_UNUSED_PARAMETER(num_repeat);
+    ONNX_UNUSED_PARAMETER(sequence);
+    ONNX_UNUSED_PARAMETER(in_chs);
+    ONNX_UNUSED_PARAMETER(out_chs);
+    ONNX_UNUSED_PARAMETER(Ydata);
+    ONNX_UNUSED_PARAMETER(gate_score);
+    ONNX_UNUSED_PARAMETER(num_expert);
+    ONNX_UNUSED_PARAMETER(input_num_expert);
+    ONNX_UNUSED_PARAMETER(input_top_k);
+    ONNX_UNUSED_PARAMETER(input_num_repeat);
     return Status::OK();
 }
 

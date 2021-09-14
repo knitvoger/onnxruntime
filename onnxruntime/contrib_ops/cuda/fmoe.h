@@ -12,7 +12,7 @@ class ThreadPool;
 namespace contrib {
 namespace cuda {
 
-#define MAX_SEQ_LENGTH 4096
+#define MAX_SEQ_LENGTH 4096*2
 
 class FMoE final : public onnxruntime::cuda::CudaKernel {
  public:
