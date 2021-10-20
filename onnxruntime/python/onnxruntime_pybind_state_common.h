@@ -5,6 +5,7 @@
 
 #include "core/common/logging/logging.h"
 #include "core/common/logging/sinks/cerr_sink.h"
+#include "core/common/optional.h"
 #include "core/framework/allocator.h"
 #include "core/framework/session_options.h"
 #include "core/session/environment.h"
@@ -13,6 +14,8 @@
 #ifdef ENABLE_TRAINING
 #include "core/dlpack/dlpack_converter.h"
 #endif
+
+#include <pybind11/pybind11.h>
 
 // execution provider factory creator headers
 struct OrtStatus {
@@ -120,6 +123,10 @@ struct OrtStatus {
 #include "core/providers/cuda/cuda_provider_factory.h"
 #include "core/providers/cuda/cuda_execution_provider_info.h"
 #endif
+#ifdef USE_ROCM
+#include "core/providers/rocm/rocm_provider_factory.h"
+#include "core/providers/rocm/rocm_execution_provider_info.h"
+#endif
 #ifdef USE_TENSORRT
 #include "core/providers/tensorrt/tensorrt_provider_factory.h"
 #endif
@@ -158,7 +165,6 @@ extern std::string nuphar_settings;
 #include "core/providers/dml/dml_provider_factory.h"
 #endif
 
-#if defined(USE_CUDA) || defined(USE_ROCM)
 #ifdef USE_CUDA
 namespace onnxruntime {
 ProviderInfo_CUDA* TryGetProviderInfo_CUDA();
@@ -169,26 +175,23 @@ extern OrtCudnnConvAlgoSearch cudnn_conv_algo_search;
 // TODO remove deprecated global config
 extern bool do_copy_in_default_stream;
 extern onnxruntime::CUDAExecutionProviderExternalAllocatorInfo external_allocator_info;
+extern onnxruntime::ArenaExtendStrategy arena_extend_strategy;
 }  // namespace python
 }  // namespace onnxruntime
 #endif
 
 #ifdef USE_ROCM
-#include "core/providers/rocm/rocm_execution_provider.h"
-#include "core/providers/rocm/rocm_allocator.h"
-#include "core/providers/rocm/rocm_provider_factory_creator.h"
 namespace onnxruntime {
+ProviderInfo_ROCM* TryGetProviderInfo_ROCM();
+ProviderInfo_ROCM& GetProviderInfo_ROCM();
 namespace python {
-extern onnxruntime::ROCMExecutionProviderExternalAllocatorInfo external_allocator_info;
-}
-}  // namespace onnxruntime
-#endif
-
 // TODO remove deprecated global config
-namespace onnxruntime {
-namespace python {
+extern bool miopen_conv_exhaustive_search;
+// TODO remove deprecated global config
+extern bool do_copy_in_default_stream;
+extern onnxruntime::ROCMExecutionProviderExternalAllocatorInfo external_allocator_info;
 extern onnxruntime::ArenaExtendStrategy arena_extend_strategy;
-}
+}  // namespace python
 }  // namespace onnxruntime
 #endif
 
@@ -196,7 +199,14 @@ extern onnxruntime::ArenaExtendStrategy arena_extend_strategy;
 #include "core/providers/shared_library/provider_host_api.h"
 
 namespace onnxruntime {
+#ifndef SHARED_PROVIDER
+class SparseTensor;
+#endif
 namespace python {
+
+using ExecutionProviderRegistrationFn = std::function<void(InferenceSession*, 
+                                                           const std::vector<std::string>&,
+                                                           const ProviderOptionsMap&)>;
 
 // TODO remove deprecated global config
 extern OrtDevice::DeviceId cuda_device_id;
@@ -294,6 +304,70 @@ inline AllocatorPtr& GetAllocator() {
   return alloc;
 }
 
+// This class exposes SparseTensor to Python
+// The class serves two major purposes
+// - to be able to map numpy arrays memory and use it on input, this serves as a reference holder
+//   so incoming arrays do not disappear
+// - to be able to expose SparseTensor returned from run method
+class PySparseTensor {
+ public:
+  /// <summary>
+  /// Use this constructor when you created a SparseTensor instance which is backed
+  /// by python array storage and it important that they stay alive while this object is
+  /// alive
+  /// </summary>
+  /// <param name="instance">a fully constructed and populated instance of SparseTensor</param>
+  /// <param name="storage">a collection reference guards</param>
+  PySparseTensor(std::unique_ptr<SparseTensor>&& instance,
+                 std::vector<pybind11::object>&& storage)
+      : backing_storage_(std::move(storage)), ort_value_() {
+    Init(std::move(instance));
+  }
+
+  /// <summary>
+  /// Same as above but no backing storage as SparseTensor owns the memory
+  /// </summary>
+  /// <param name="instance"></param>
+  explicit PySparseTensor(std::unique_ptr<SparseTensor>&& instance)
+      : backing_storage_(), ort_value_() {
+    Init(std::move(instance));
+  }
+
+  explicit PySparseTensor(const OrtValue& ort_value)
+      : backing_storage_(), ort_value_(ort_value) {}
+
+  PySparseTensor(const PySparseTensor&) = delete;
+  PySparseTensor& operator=(const PySparseTensor&) = delete;
+
+  PySparseTensor(PySparseTensor&& o) noexcept {
+    *this = std::move(o);
+  }
+
+  PySparseTensor& operator=(PySparseTensor&& o) noexcept {
+    ort_value_ = std::move(o.ort_value_);
+    backing_storage_ = std::move(o.backing_storage_);
+    return *this;
+  }
+
+  ~PySparseTensor();
+
+  const SparseTensor& Instance() const {
+    return ort_value_.Get<SparseTensor>();
+  }
+
+  std::unique_ptr<OrtValue> AsOrtValue() const {
+    return std::make_unique<OrtValue>(ort_value_);
+  }
+
+ private:
+  void Init(std::unique_ptr<SparseTensor>&& instance);
+
+  // These will hold references to underpinning python array objects
+  // when they serve as a backing storage for a feeding SparseTensor
+  std::vector<pybind11::object> backing_storage_;
+  OrtValue ort_value_;
+};
+
 class SessionObjectInitializer {
  public:
   typedef const PySessionOptions& Arg1;
@@ -320,6 +394,7 @@ Environment& GetEnv();
 // Initialize an InferenceSession.
 // Any provider_options should have entries in matching order to provider_types.
 void InitializeSession(InferenceSession* sess,
+                       ExecutionProviderRegistrationFn ep_registration_fn,
                        const std::vector<std::string>& provider_types = {},
                        const ProviderOptionsVector& provider_options = {},
                        const std::unordered_set<std::string>& disabled_optimizer_names = {});
@@ -330,6 +405,16 @@ void ThrowIfPyErrOccured();
 void addOrtValueMethods(pybind11::module& m);
 
 void addIoBindingMethods(pybind11::module& m);
+
+void addSparseTensorMethods(pybind11::module& m);
+
+#ifdef onnxruntime_PYBIND_EXPORT_OPSCHEMA
+void addGlobalSchemaFunctions(pybind11::module& m);
+
+void addOpKernelSubmodule(pybind11::module& m);
+
+void addOpSchemaSubmodule(pybind11::module& m);
+#endif
 
 const char* GetDeviceName(const OrtDevice& device);
 
@@ -355,4 +440,24 @@ OrtValue FromDlpack(PyObject* dlpack_tensor, const bool is_bool_tensor);
 #endif
 
 }  // namespace python
+
+std::shared_ptr<IExecutionProviderFactory> CreateExecutionProviderFactory_Tensorrt(const OrtTensorRTProviderOptions* params);
+std::shared_ptr<IExecutionProviderFactory> CreateExecutionProviderFactory_Tensorrt(int device_id);
+std::shared_ptr<IExecutionProviderFactory> CreateExecutionProviderFactory_MIGraphX(int device_id);
+std::shared_ptr<IExecutionProviderFactory> CreateExecutionProviderFactory_Cuda(const OrtCUDAProviderOptions* params);
+std::shared_ptr<IExecutionProviderFactory> CreateExecutionProviderFactory_Dnnl(int use_arena);
+std::shared_ptr<IExecutionProviderFactory> CreateExecutionProviderFactory_OpenVINO(const OrtOpenVINOProviderOptions* params);
+std::shared_ptr<IExecutionProviderFactory> CreateExecutionProviderFactory_Nuphar(bool, const char*);
+std::shared_ptr<IExecutionProviderFactory> CreateExecutionProviderFactory_VITISAI(const char* backend_type, int device_id,
+                                                                                  const char* export_runtime_module,
+                                                                                  const char* load_runtime_module);
+std::shared_ptr<IExecutionProviderFactory> CreateExecutionProviderFactory_ACL(int use_arena);
+std::shared_ptr<IExecutionProviderFactory> CreateExecutionProviderFactory_ArmNN(int use_arena);
+std::shared_ptr<IExecutionProviderFactory> CreateExecutionProviderFactory_DML(int device_id);
+std::shared_ptr<IExecutionProviderFactory> CreateExecutionProviderFactory_Nnapi(
+    uint32_t flags, const optional<std::string>& partitioning_stop_ops_list);
+std::shared_ptr<IExecutionProviderFactory> CreateExecutionProviderFactory_Rknpu();
+std::shared_ptr<IExecutionProviderFactory> CreateExecutionProviderFactory_CoreML(uint32_t flags);
+
+constexpr const char* kDefaultExecutionProviderEntry = "GetProvider"; 
 }  // namespace onnxruntime

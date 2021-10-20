@@ -30,16 +30,20 @@ class Precision(Enum):
     def __str__(self):
         return self.value
 
+
 IO_BINDING_DATA_TYPE_MAP = {
     "float32": numpy.float32,
-    # TODO: Add more. 
+    # TODO: Add more.
 }
+
+
 def create_onnxruntime_session(onnx_model_path,
                                use_gpu,
                                enable_all_optimization=True,
                                num_threads=-1,
                                enable_profiling=False,
-                               verbose=False):
+                               verbose=False,
+                               use_dml=False):
     session = None
     try:
         from onnxruntime import SessionOptions, InferenceSession, GraphOptimizationLevel, __version__ as onnxruntime_version
@@ -63,8 +67,13 @@ def create_onnxruntime_session(onnx_model_path,
             sess_options.log_severity_level = 4
 
         logger.debug(f"Create session for onnx model: {onnx_model_path}")
-        execution_providers = ['CPUExecutionProvider'
-                               ] if not use_gpu else ['CUDAExecutionProvider', 'CPUExecutionProvider']
+        if use_gpu:
+            if use_dml:
+                execution_providers = ['DmlExecutionProvider', 'CPUExecutionProvider']
+            else:
+                execution_providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+        else:
+            execution_providers = ['CPUExecutionProvider']
         session = InferenceSession(onnx_model_path, sess_options, providers=execution_providers)
     except:
         logger.error(f"Exception", exc_info=True)
@@ -80,7 +89,7 @@ def setup_logger(verbose=True):
         logging.getLogger("transformers").setLevel(logging.WARNING)
 
 
-def prepare_environment(cache_dir, output_dir, use_gpu):
+def prepare_environment(cache_dir, output_dir, use_gpu, use_dml=False):
     if cache_dir and not os.path.exists(cache_dir):
         os.makedirs(cache_dir)
 
@@ -89,8 +98,14 @@ def prepare_environment(cache_dir, output_dir, use_gpu):
 
     import onnxruntime
     if use_gpu:
-        assert 'CUDAExecutionProvider' in onnxruntime.get_available_providers(
-        ), "Please install onnxruntime-gpu package to test GPU inference."
+        if use_dml:
+            assert 'DmlExecutionProvider' in onnxruntime.get_available_providers(
+            ), "Please install onnxruntime-directml package to test GPU inference."
+
+        else:
+            assert 'CUDAExecutionProvider' in onnxruntime.get_available_providers(
+            ), "Please install onnxruntime-gpu package to test GPU inference."
+
 
     import transformers
     logger.info(f'PyTorch Version:{torch.__version__}')
@@ -217,7 +232,8 @@ def inference_ort_with_io_binding(ort_session,
     # Bind inputs to device
     for name in ort_inputs.keys():
         np_input = torch.from_numpy(ort_inputs[name]).to(device)
-        input_type = IO_BINDING_DATA_TYPE_MAP[str(ort_inputs[name].dtype)] if str(ort_inputs[name].dtype) in IO_BINDING_DATA_TYPE_MAP else data_type
+        input_type = IO_BINDING_DATA_TYPE_MAP[str(ort_inputs[name].dtype)] if str(
+            ort_inputs[name].dtype) in IO_BINDING_DATA_TYPE_MAP else data_type
         io_binding.bind_input(name, np_input.device.type, 0, input_type, np_input.shape, np_input.data_ptr())
     # Bind outputs buffers with the sizes needed if not allocated already
     if len(output_buffers) == 0:
