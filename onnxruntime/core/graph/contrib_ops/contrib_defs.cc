@@ -1803,6 +1803,27 @@ Example 4:
   output  = [[[2,3]],[[4,5]]]
 )DOC");
 
+  ONNX_CONTRIB_OPERATOR_SCHEMA(FMoE)
+      .SetDomain(kMSDomain)
+      .SinceVersion(1)
+      .SetDoc(R"DOC(For internal use.)DOC")
+      .Input(0, "X", "", "T")
+      .Input(1, "W", "", "T")
+      .Input(2, "B", "", "T")
+      .Input(3, "num_expert", "", "T1")
+      .Input(4, "top_k", "", "T1")
+      .Input(5, "gate_index", "", "T1")
+      .Input(6, "gate_score", "", "T")
+      .Input(7, "num_repeat", "", "T1")
+      .Output(0, "Y", "", "T")
+      .TypeConstraint("T", {"tensor(float)"}, "Constrain input and output types to float tensors")
+      .TypeConstraint("T1", {"tensor(int64)"}, "Constrain input types.")
+      .TypeAndShapeInferenceFunction([](ONNX_NAMESPACE::InferenceContext& ctx) {
+        ONNX_NAMESPACE::propagateElemTypeFromInputToOutput(ctx, 0, 0);
+        if (!hasNInputShapes(ctx, 1)) {
+          return;
+        }
+      });
   ONNX_CONTRIB_OPERATOR_SCHEMA(WordConvEmbedding)
       .SetDomain(kMSDomain)
       .SinceVersion(1)
