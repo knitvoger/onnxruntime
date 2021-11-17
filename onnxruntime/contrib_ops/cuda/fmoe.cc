@@ -102,8 +102,12 @@ Status FMoE::ComputeInternal(OpKernelContext* context) const {
     cudaMemcpyAsync(const_cast<int64_t*>(&num_repeat), input_num_repeat->template Data<int64_t>(), sizeof(int64_t), cudaMemcpyDeviceToHost, nullptr);
     
     int64_t gate_size = input_gate_index->Shape()[0] * input_gate_index->Shape()[1];
-    cudaMemcpyAsync(const_cast<int64_t*>(gate_index), input_gate_index->template Data<int64_t>(), sizeof(int64_t) * gate_size, cudaMemcpyDeviceToHost, nullptr);
-    cudaMemcpyAsync(const_cast<float*>(gate_score), input_gate_score->template Data<float>(), sizeof(float) * gate_size, cudaMemcpyDeviceToHost, nullptr);
+    std::vector<int64_t> gate_index_vec(gate_size);
+    std::vector<float> gate_score_vec(gate_size);
+    int64_t *gate_index = gate_index_vec.data();
+    float *gate_score = gate_score_vec.data();
+    cudaMemcpyAsync(gate_index, input_gate_index->template Data<int64_t>(), sizeof(int64_t) * gate_size, cudaMemcpyDeviceToHost, nullptr);
+    cudaMemcpyAsync(gate_score, input_gate_score->template Data<float>(), sizeof(float) * gate_size, cudaMemcpyDeviceToHost, nullptr);
 
     std::vector<int64_t> Y_dims({num_repeat == 1 ? sequence * top_k : sequence, out_chs});
     Tensor* Y = context->Output(0, Y_dims);
