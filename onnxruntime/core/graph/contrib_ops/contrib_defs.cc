@@ -1816,7 +1816,7 @@ Example 4:
       .Input(6, "gate_score", "", "T")
       .Input(7, "num_repeat", "", "T1")
       .Output(0, "Y", "", "T")
-      .TypeConstraint("T", {"tensor(float)"}, "Constrain input and output types to float tensors")
+      .TypeConstraint("T", {"tensor(float16)", "tensor(float)"}, "Constrain input and output types to float tensors")
       .TypeConstraint("T1", {"tensor(int64)"}, "Constrain input types.")
       .TypeAndShapeInferenceFunction([](ONNX_NAMESPACE::InferenceContext& ctx) {
         ONNX_NAMESPACE::propagateElemTypeFromInputToOutput(ctx, 0, 0);
