@@ -166,7 +166,7 @@ Status FMoE::ComputeInternal(OpKernelContext* context) const
         return FMoEImpl<MLFloat16>(context);
     }
     else {
-        return Status::OK();
+        return common::Status(common::ONNXRUNTIME, common::INVALID_ARGUMENT, "FMoE module only supports float/float16!");
     }
 }
 
