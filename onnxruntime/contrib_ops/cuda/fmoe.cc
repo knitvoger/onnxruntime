@@ -31,13 +31,14 @@ typedef typename onnxruntime::cuda::ToCudaType<float>::MappedType CudaT;
 
 template <typename T>
 Status FMoE:: ExpertConv(OpKernelContext* context, const T *input, int64_t start_index, int64_t end_index, int64_t in_chs, int64_t out_chs, 
-                const T *Wdata, const T *Bdata, int64_t gate_index, T *output) const
+                const T *Wdata, const T *Bdata, int64_t gate_index, T *output_) const
 {
     typedef typename ToCudaType<T>::MappedType CudaT;
     ONNX_UNUSED_PARAMETER(context);
     //auto start_time = std::chrono::system_clock::now();
-    const T *weight = Wdata + gate_index * in_chs * out_chs;
-    const T *bias = Bdata + gate_index * out_chs;
+    const CudaT *weight = reinterpret_cast<const CudaT*>(Wdata + gate_index * in_chs * out_chs);
+    const CudaT *bias = reinterpret_cast<const CudaT*>(Bdata + gate_index * out_chs);
+    CudaT *output = reinterpret_cast<CudaT*>(output_);
 
     int64_t M = end_index - start_index;
     int64_t N = out_chs;

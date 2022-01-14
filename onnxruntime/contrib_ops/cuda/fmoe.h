@@ -25,7 +25,7 @@ class FMoE final : public onnxruntime::cuda::CudaKernel {
   Status FMoEImpl(OpKernelContext* context) const;
   template <typename T>
   Status ExpertConv(OpKernelContext* context, const T *input, int64_t start_index, int64_t end_index, int64_t in_chs, int64_t out_chs, 
-                const T *Wdata, const T *Bdata, int64_t gate_index, T *output) const;
+                const T *Wdata, const T *Bdata, int64_t gate_index, T *output_) const;
 
   ~FMoE() { }
 
