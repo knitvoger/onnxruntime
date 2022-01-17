@@ -21,8 +21,11 @@ class FMoE final : public onnxruntime::cuda::CudaKernel {
   }
 
   Status ComputeInternal(OpKernelContext* context) const override;
-  Status ExpertConv(OpKernelContext* context, const float *input, int64_t start_index, int64_t end_index, int64_t in_chs, int64_t out_chs, 
-                const float *Wdata, const float *Bdata, int64_t gate_index, float *output) const;
+  template <typename T>
+  Status FMoEImpl(OpKernelContext* context) const;
+  template <typename T>
+  Status ExpertConv(OpKernelContext* context, const T *input, int64_t start_index, int64_t end_index, int64_t in_chs, int64_t out_chs, 
+                const T *Wdata, const T *Bdata, int64_t gate_index, T *output_) const;
 
   ~FMoE() { }
 

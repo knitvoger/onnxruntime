@@ -29,21 +29,24 @@ namespace cuda {
 
 typedef typename onnxruntime::cuda::ToCudaType<float>::MappedType CudaT;
 
-Status FMoE:: ExpertConv(OpKernelContext* context, const float *input, int64_t start_index, int64_t end_index, int64_t in_chs, int64_t out_chs, 
-                const float *Wdata, const float *Bdata, int64_t gate_index, float *output) const
+template <typename T>
+Status FMoE:: ExpertConv(OpKernelContext* context, const T *input, int64_t start_index, int64_t end_index, int64_t in_chs, int64_t out_chs, 
+                const T *Wdata, const T *Bdata, int64_t gate_index, T *output_) const
 {
+    typedef typename ToCudaType<T>::MappedType CudaT;
     ONNX_UNUSED_PARAMETER(context);
     //auto start_time = std::chrono::system_clock::now();
-    const float *weight = Wdata + gate_index * in_chs * out_chs;
-    const float *bias = Bdata + gate_index * out_chs;
+    const CudaT *weight = reinterpret_cast<const CudaT*>(Wdata + gate_index * in_chs * out_chs);
+    const CudaT *bias = reinterpret_cast<const CudaT*>(Bdata + gate_index * out_chs);
+    CudaT *output = reinterpret_cast<CudaT*>(output_);
 
     int64_t M = end_index - start_index;
     int64_t N = out_chs;
     int64_t K = in_chs;
     TensorShape bias_shape = {N};
 
-    auto one = onnxruntime::cuda::ToCudaType<float>::FromFloat(1.0f);
-    auto zero = onnxruntime::cuda::ToCudaType<float>::FromFloat(0.0f);
+    auto one = onnxruntime::cuda::ToCudaType<T>::FromFloat(1.0f);
+    auto zero = onnxruntime::cuda::ToCudaType<T>::FromFloat(0.0f);
     auto& device_prop = GetDeviceProp();
 
     // broadcast bias
@@ -58,8 +61,8 @@ Status FMoE:: ExpertConv(OpKernelContext* context, const float *input, int64_t s
         &zero,
         output, N, device_prop));
 
-    CudaT alpha = ToCudaType<float>::FromFloat(1.0);
-    CudaT beta = ToCudaType<float>::FromFloat(1.0);
+    CudaT alpha = ToCudaType<T>::FromFloat(1.0);
+    CudaT beta = ToCudaType<T>::FromFloat(1.0);
     CUBLAS_RETURN_IF_ERROR(cublasGemmHelper(
       CublasHandle(),
       trans_B_ ? CUBLAS_OP_T : CUBLAS_OP_N,
@@ -78,7 +81,9 @@ Status FMoE:: ExpertConv(OpKernelContext* context, const float *input, int64_t s
     return Status::OK();
 }
 
-Status FMoE::ComputeInternal(OpKernelContext* context) const {
+template <typename T>
+Status FMoE::FMoEImpl(OpKernelContext* context) const
+{
     const auto* X = context->Input<Tensor>(0);
     const auto* W = context->Input<Tensor>(1);
     const auto* B = context->Input<Tensor>(2);
@@ -94,31 +99,31 @@ Status FMoE::ComputeInternal(OpKernelContext* context) const {
     int64_t out_chs = W->Shape()[1];
 
     // Inputs
-    const float *Xdata = X->template Data<float>();
-    const float *Wdata = W->template Data<float>();
-    const float *Bdata = B->template Data<float>();
+    const T *Xdata = X->template Data<T>();
+    const T *Wdata = W->template Data<T>();
+    const T *Bdata = B->template Data<T>();
     cudaMemcpyAsync(const_cast<int64_t*>(&num_expert), input_num_expert->template Data<int64_t>(), sizeof(int64_t), cudaMemcpyDeviceToHost, nullptr);
     cudaMemcpyAsync(const_cast<int64_t*>(&top_k), input_top_k->template Data<int64_t>(), sizeof(int64_t), cudaMemcpyDeviceToHost, nullptr);
     cudaMemcpyAsync(const_cast<int64_t*>(&num_repeat), input_num_repeat->template Data<int64_t>(), sizeof(int64_t), cudaMemcpyDeviceToHost, nullptr);
     
     int64_t gate_size = input_gate_index->Shape()[0] * input_gate_index->Shape()[1];
     std::vector<int64_t> gate_index_vec(gate_size);
-    std::vector<float> gate_score_vec(gate_size);
+    std::vector<T> gate_score_vec(gate_size);
     int64_t *gate_index = gate_index_vec.data();
-    float *gate_score = gate_score_vec.data();
+    T *gate_score = gate_score_vec.data();
     cudaMemcpyAsync(gate_index, input_gate_index->template Data<int64_t>(), sizeof(int64_t) * gate_size, cudaMemcpyDeviceToHost, nullptr);
-    cudaMemcpyAsync(gate_score, input_gate_score->template Data<float>(), sizeof(float) * gate_size, cudaMemcpyDeviceToHost, nullptr);
+    cudaMemcpyAsync(gate_score, input_gate_score->template Data<T>(), sizeof(T) * gate_size, cudaMemcpyDeviceToHost, nullptr);
 
     std::vector<int64_t> Y_dims({num_repeat == 1 ? sequence * top_k : sequence, out_chs});
     Tensor* Y = context->Output(0, Y_dims);
-    float* Ydata = Y->template MutableData<float>();
+    T* Ydata = Y->template MutableData<T>();
 
     int64_t total_processed = 0;
     for (int64_t k = 0; k < top_k; k++)
     {
         int64_t seq_k = num_repeat == 1 ? sequence : sequence / top_k;
-        const float *input_x = num_repeat == 1 ? Xdata : (Xdata + k * seq_k * in_chs);
-        float *output_k = Ydata + k * seq_k * out_chs;
+        const T *input_x = num_repeat == 1 ? Xdata : (Xdata + k * seq_k * in_chs);
+        T *output_k = Ydata + k * seq_k * out_chs;
         const int64_t *gate_index_k = gate_index + k * seq_k;
 
         std::set<int64_t> unique_gates;
@@ -151,13 +156,31 @@ Status FMoE::ComputeInternal(OpKernelContext* context) const {
     return Status::OK();
 }
 
+Status FMoE::ComputeInternal(OpKernelContext* context) const
+{
+    const auto* X = context->Input<Tensor>(0);
+    if (X->IsDataType<float>()) {
+        return FMoEImpl<float>(context);
+    }
+    else if (X->IsDataType<MLFloat16>()) {
+        return FMoEImpl<MLFloat16>(context);
+    }
+    else {
+        return common::Status(common::ONNXRUNTIME, common::INVALID_ARGUMENT, "FMoE module only supports float/float16!");
+    }
+}
+
 ONNX_OPERATOR_TYPED_KERNEL_EX(
     FMoE,
     kMSDomain,
     1,
     float,
     kCudaExecutionProvider,
-    (*KernelDefBuilder::Create()).TypeConstraint("T", DataTypeImpl::GetTensorType<float>()).TypeConstraint("T1", DataTypeImpl::GetTensorType<int64_t>()),
+    (*KernelDefBuilder::Create())
+    .TypeConstraint("T", std::vector<MLDataType>{
+                                 DataTypeImpl::GetTensorType<float>(),
+                                 DataTypeImpl::GetTensorType<MLFloat16>()})
+    .TypeConstraint("T1", DataTypeImpl::GetTensorType<int64_t>()),
     FMoE);
 
 }
