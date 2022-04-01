@@ -26,45 +26,48 @@ __global__ void _PadKernel(
     const TArray<fast_divmod> fdm_output_strides,
     T* output_data,
     const size_t N) {
-  CALCULATE_ELEMENTWISE_INDEX_OR_EXIT(id, N);
-  CUDA_LONG input_index = 0;
-  CUDA_LONG output_index = id;
-  bool use_pad_value = false;
-  for (int dim = 0; dim < shape_rank && !use_pad_value; ++dim) {
-    int out_coord, r;
-    fdm_output_strides[dim].divmod(output_index, out_coord, r);
-    output_index = r;
-    int in_coord = 0;
-    if (out_coord < lower_pads[dim]) {
-      switch ((PadMode)pad_mode) {
-        case PadMode::Constant:
-          use_pad_value = true;
-          break;
-        case PadMode::Edge:
-          in_coord = 0;
-          break;
-        case PadMode::Reflect:
-          in_coord = lower_pads[dim] - out_coord;
-          break;
-      }
-    } else if (out_coord >= lower_pads[dim] + input_dims[dim]) {
-      switch ((PadMode)pad_mode) {
-        case PadMode::Constant:
-          use_pad_value = true;
-          break;
-        case PadMode::Edge:
-          in_coord = input_dims[dim] - 1;
-          break;
-        case PadMode::Reflect:
-          in_coord = input_dims[dim] - 2 - (out_coord - (lower_pads[dim] + input_dims[dim]));
-          break;
-      }
-    } else {
-      in_coord = out_coord - lower_pads[dim];
+  //CALCULATE_ELEMENTWISE_INDEX_OR_EXIT(id, N);
+  for (int id = blockDim.x * blockIdx.x + threadIdx.x; id < N; id += gridDim.x * blockDim.x)
+  {
+    CUDA_LONG input_index = 0;
+    CUDA_LONG output_index = id;
+    bool use_pad_value = false;
+    for (int dim = 0; dim < shape_rank && !use_pad_value; ++dim) {
+        int out_coord, r;
+        fdm_output_strides[dim].divmod(output_index, out_coord, r);
+        output_index = r;
+        int in_coord = 0;
+        if (out_coord < lower_pads[dim]) {
+        switch ((PadMode)pad_mode) {
+            case PadMode::Constant:
+            use_pad_value = true;
+            break;
+            case PadMode::Edge:
+            in_coord = 0;
+            break;
+            case PadMode::Reflect:
+            in_coord = lower_pads[dim] - out_coord;
+            break;
+        }
+        } else if (out_coord >= lower_pads[dim] + input_dims[dim]) {
+        switch ((PadMode)pad_mode) {
+            case PadMode::Constant:
+            use_pad_value = true;
+            break;
+            case PadMode::Edge:
+            in_coord = input_dims[dim] - 1;
+            break;
+            case PadMode::Reflect:
+            in_coord = input_dims[dim] - 2 - (out_coord - (lower_pads[dim] + input_dims[dim]));
+            break;
+        }
+        } else {
+        in_coord = out_coord - lower_pads[dim];
+        }
+        input_index += input_strides[dim] * in_coord;
     }
-    input_index += input_strides[dim] * in_coord;
+    output_data[id] = use_pad_value ? (T)pad_value : input_data[input_index];
   }
-  output_data[id] = use_pad_value ? (T)pad_value : input_data[input_index];
 }
 
 template <typename T>
@@ -84,7 +87,9 @@ void PadImpl(
   if (N == 0) // special case where there's a dim value of 0 in the output shape
     return;
 
-  int blocksPerGrid = (int)(ceil(static_cast<float>(N) / GridDim::maxThreadsPerBlock));
+  int blocksPerGrid = min(256, (int)(ceil(static_cast<float>(N) / GridDim::maxThreadsPerBlock)));
+  //int blocksPerGrid = (int)(ceil(static_cast<float>(N) / GridDim::maxThreadsPerBlock));
+  //printf("block per grid %d\n", blocksPerGrid);
   switch (pad_mode) {
     case 0:
       _PadKernel<T, 0><<<blocksPerGrid, GridDim::maxThreadsPerBlock, 0, stream>>>(
