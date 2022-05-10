@@ -1824,6 +1824,26 @@ Example 4:
           return;
         }
       });
+  ONNX_CONTRIB_OPERATOR_SCHEMA(FastRNN)
+      .SetDomain(kMSDomain)
+      .SinceVersion(1)
+      .SetDoc(R"DOC(For internal use.)DOC")
+      .Input(0, "X", "", "T")
+      .Input(1, "hidden_states", "", "T")
+      .Input(2, "W", "", "T")
+      .Input(3, "U", "", "T")
+      .Input(4, "bias_gate", "", "T")
+      .Input(5, "bias_update", "", "T")
+      .Input(6, "zeta", "", "T")
+      .Input(7, "nu", "", "T")
+      .Output(0, "Y", "", "T")
+      .TypeConstraint("T", {"tensor(float16)", "tensor(float)"}, "Constrain input and output types to float tensors")
+      .TypeAndShapeInferenceFunction([](ONNX_NAMESPACE::InferenceContext& ctx) {
+        ONNX_NAMESPACE::propagateElemTypeFromInputToOutput(ctx, 0, 0);
+        if (!hasNInputShapes(ctx, 1)) {
+          return;
+        }
+      });
   ONNX_CONTRIB_OPERATOR_SCHEMA(WordConvEmbedding)
       .SetDomain(kMSDomain)
       .SinceVersion(1)
