@@ -81,6 +81,11 @@ Status FastRNN::Compute(OpKernelContext* context) const {
     float *uComp = buffer + out_chs;
     float *preComp = buffer + 2 * out_chs;
 
+    // wComp = (float*)malloc(sizeof(float) * sequence * out_chs);
+    // TensorShape state_shape = {sequence, out_chs};
+    // Gemm(CblasNoTrans, CblasNoTrans, sequence, 512, 512, 1.0, Xdata, Wdata, 1.0,
+    //               nullptr, &state_shape, wComp, thread_pool);
+
     for (int i = 0; i < sequence; i++)
     {
       const float *Xdata_i = Xdata + i * in_chs;
