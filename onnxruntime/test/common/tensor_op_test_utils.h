@@ -6,20 +6,35 @@
 #include <random>
 #include <type_traits>
 
+#include "core/common/gsl.h"
+
 #include "gtest/gtest.h"
 
 #include "core/common/common.h"
 #include "core/common/optional.h"
 #include "core/common/type_utils.h"
+#include "core/framework/tensor.h"
 #include "core/util/math.h"
 
 namespace onnxruntime {
 namespace test {
 
 namespace detail {
-inline int64_t SizeFromDims(const std::vector<int64_t>& dims) {
-  const int64_t size = std::accumulate(
-      dims.cbegin(), dims.cend(), static_cast<int64_t>(1), std::multiplies<int64_t>{});
+inline int64_t SizeFromDims(gsl::span<const int64_t> dims, gsl::span<const int64_t> strides = {}) {
+  int64_t size = 1;
+  if (strides.empty()) {
+    size = std::accumulate(dims.begin(), dims.end(), static_cast<int64_t>(1), std::multiplies<int64_t>{});
+  } else {
+    ORT_ENFORCE(dims.size() == strides.size());
+    for (size_t dim = 0; dim < dims.size(); ++dim) {
+      if (dims[dim] == 0) {
+        size = 0;
+        break;
+      }
+      size += strides[dim] * (dims[dim] - 1);
+    }
+  }
+
   ORT_ENFORCE(size >= 0);
   return size;
 }
@@ -41,7 +56,7 @@ class RandomValueGenerator {
   typename std::enable_if<
       std::is_floating_point<TFloat>::value,
       std::vector<TFloat>>::type
-  Uniform(const std::vector<int64_t>& dims, TFloat min, TFloat max) {
+  Uniform(gsl::span<const int64_t> dims, TFloat min, TFloat max) {
     std::vector<TFloat> val(detail::SizeFromDims(dims));
     std::uniform_real_distribution<TFloat> distribution(min, max);
     for (size_t i = 0; i < val.size(); ++i) {
@@ -51,11 +66,25 @@ class RandomValueGenerator {
   }
 
   // Random values generated are in the range [min, max).
+  template <typename TFloat16>
+  typename std::enable_if<
+      std::is_same_v<TFloat16, MLFloat16>,
+      std::vector<TFloat16>>::type
+  Uniform(gsl::span<const int64_t> dims, float min, float max) {
+    std::vector<TFloat16> val(detail::SizeFromDims(dims));
+    std::uniform_real_distribution<float> distribution(min, max);
+    for (size_t i = 0; i < val.size(); ++i) {
+      val[i] = TFloat16(math::floatToHalf(distribution(generator_)));
+    }
+    return val;
+  }
+
+  // Random values generated are in the range [min, max).
   template <typename TInt>
   typename std::enable_if<
       std::is_integral<TInt>::value && !utils::IsByteType<TInt>::value,
       std::vector<TInt>>::type
-  Uniform(const std::vector<int64_t>& dims, TInt min, TInt max) {
+  Uniform(gsl::span<const int64_t> dims, TInt min, TInt max) {
     std::vector<TInt> val(detail::SizeFromDims(dims));
     std::uniform_int_distribution<TInt> distribution(min, max - 1);
     for (size_t i = 0; i < val.size(); ++i) {
@@ -68,7 +97,7 @@ class RandomValueGenerator {
   typename std::enable_if<
       utils::IsByteType<TByte>::value,
       std::vector<TByte>>::type
-  Uniform(const std::vector<int64_t>& dims, TByte min, TByte max) {
+  Uniform(gsl::span<const int64_t> dims, TByte min, TByte max) {
     std::vector<TByte> val(detail::SizeFromDims(dims));
     std::uniform_int_distribution<int32_t> distribution(min, max - 1);
     for (size_t i = 0; i < val.size(); ++i) {
@@ -82,7 +111,7 @@ class RandomValueGenerator {
   typename std::enable_if<
       std::is_floating_point<TFloat>::value,
       std::vector<TFloat>>::type
-  Gaussian(const std::vector<int64_t>& dims, TFloat mean, TFloat stddev) {
+  Gaussian(gsl::span<const int64_t> dims, TFloat mean, TFloat stddev) {
     std::vector<TFloat> val(detail::SizeFromDims(dims));
     std::normal_distribution<TFloat> distribution(mean, stddev);
     for (size_t i = 0; i < val.size(); ++i) {
@@ -138,6 +167,72 @@ class RandomValueGenerator {
   const ::testing::ScopedTrace output_trace_;
 };
 
+// This class provides similar functionality as `RandomValueGenerator` but generates `fixed` patterns
+// for given tensor element type and shape. It should be used in unstable tests because
+// `purely random` patterns can easily trigger numerical errors.
+class FixedPatternValueGenerator {
+ public:
+  explicit FixedPatternValueGenerator();
+
+  template <typename TValue>
+  std::vector<TValue>
+  Discrete(gsl::span<const int64_t> dims, const std::vector<TValue>& value_candidates) {
+    std::vector<TValue> values(detail::SizeFromDims(dims));
+    std::uniform_int_distribution<size_t> distribution(0, value_candidates.size() - 1);
+    // Tier 2 RNG. Use it if `RandomValueGenerator::Uniform` method causes large numerical errors
+    // (e.g., when elementwise relative error > 1e-3).
+    //
+    // The generated tensor is more numerically stable than other `RandomValueGenerator::Uniform` methods.
+    // If a test constantly fails, it's better to use `Discrete` method. For example,
+    // we call `Discrete` method to generate a tensor with shape [2, 3] and value candidates
+    // [-1, 0, 1] to eliminate the error propagation caused by * and / in matrix multiplication.
+    // To trigger mild error propagation in * and /, try value candidates [-1.5, -1, 0, 1, 1.5].
+    //
+    // Suggested value_candidates to alleviate numerical error (listed
+    // from smallest error to largest error):
+    //  [0]
+    //  [1]
+    //  [0, 1]
+    //  [-1, 0, 1]
+    //  [-2, -1, 0, 1, 2]
+    //  [-1.5, -1, 0, 1, 1.5]
+    //  [-2, -1.5, -1, 0, 1, 1.5, 2]
+    for (size_t i = 0; i < values.size(); ++i) {
+      // To maximize stability, use constant_generator_ since
+      // it's always initialized with 0.
+      auto index = distribution(generator_);
+      values[i] = value_candidates[index];
+    }
+    return values;
+  }
+
+  template <typename TValue>
+  std::vector<TValue>
+  Circular(gsl::span<const int64_t> dims, const std::vector<TValue>& value_candidates) {
+    // Tier 3 RNG. Use it if `Discrete` method causes large numerical errors
+    // (e.g., when elementwise relative error > 1e-3).
+    // Suggested value_candidates to alleviate numerical error (listed
+    // from smallest error to largest error):
+    //  [0]
+    //  [1]
+    //  [0, 1]
+    //  [-1, 0, 1]
+    //  [-2, -1, 0, 1, 2]
+    //  [-1.5, -1, 0, 1, 1.5]
+    //  [-2, -1.5, -1, 0, 1, 1.5, 2]
+    std::vector<TValue> values(detail::SizeFromDims(dims));
+    for (size_t i = 0; i < values.size(); ++i) {
+      auto index = i % value_candidates.size();
+      values[i] = value_candidates[index];
+    }
+    return values;
+  }
+
+ private:
+  std::default_random_engine generator_;
+  const ::testing::ScopedTrace output_trace_;
+};
+
 template <class T>
 inline std::vector<T> FillZeros(const std::vector<int64_t>& dims) {
   std::vector<T> val(detail::SizeFromDims(dims), T{});
@@ -146,14 +241,26 @@ inline std::vector<T> FillZeros(const std::vector<int64_t>& dims) {
 
 // Returns a vector of `count` values which start at `start` and change by increments of `step`.
 template <typename T>
-inline std::vector<T> ValueRange(
-    size_t count, T start = static_cast<T>(0), T step = static_cast<T>(1)) {
+inline std::vector<T> ValueRange(size_t count, T start = static_cast<T>(0.f), T step = static_cast<T>(1.f)) {
   std::vector<T> result;
   result.reserve(count);
   T curr = start;
   for (size_t i = 0; i < count; ++i) {
     result.emplace_back(curr);
     curr += step;
+  }
+  return result;
+}
+
+template <>
+inline std::vector<MLFloat16> ValueRange<MLFloat16>(size_t count, MLFloat16 start, MLFloat16 step) {
+  std::vector<MLFloat16> result;
+  result.reserve(count);
+  float curr = start.ToFloat();
+  float f_step = step.ToFloat();
+  for (size_t i = 0; i < count; ++i) {
+    result.emplace_back(MLFloat16(curr));
+    curr += f_step;
   }
   return result;
 }

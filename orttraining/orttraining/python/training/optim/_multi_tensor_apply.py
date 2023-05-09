@@ -3,15 +3,15 @@
 # multi_tensor_apply.py
 # This file has been adapted from microsoft/DeepSpeed
 
-'''
+"""
 Copyright 2020 The Microsoft DeepSpeed Team
 
 Copyright NVIDIA/apex
 This file is adapted from NVIDIA/apex, commit a109f85
-'''
+"""
 
 
-class MultiTensorApply(object):
+class MultiTensorApply:
     def __init__(self, chunk_size):
         self.chunk_size = chunk_size
 

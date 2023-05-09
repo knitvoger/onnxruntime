@@ -5,54 +5,67 @@
 // for Slice op, which can be called from other ops or EPs.
 #pragma once
 #include "core/providers/cpu/tensor/slice_compute_metadata.h"
+#include "core/common/inlined_containers.h"
+#include "core/common/narrow.h"
+#include "core/framework/ort_stl_allocator.h"
 
 namespace onnxruntime {
 
 namespace SliceOp {
 // compute output_dims without steps (Slice V1-9 & DynamicSlice)
 // Please note this will not Flatten the output shape
-inline Status PrepareForComputeHelper(const std::vector<int64_t>& raw_starts,
-                                      const std::vector<int64_t>& raw_ends,
-                                      const std::vector<int64_t>& raw_axes,
+inline Status PrepareForComputeHelper(const gsl::span<const int64_t>& raw_starts,
+                                      const gsl::span<const int64_t>& raw_ends,
+                                      const gsl::span<const int64_t>& raw_axes,
                                       SliceOp::PrepareForComputeMetadata& compute_metadata) {
   // Initialize axes to the provided axes attribute or to the default sequence
-  std::vector<int64_t> axes(raw_axes);
-  if (axes.empty()) {
-    //axes are omitted, they are set to[0, ..., ndim - 1]
-    axes.resize(raw_starts.size());
-    std::iota(axes.begin(), axes.end(), 0);
+  TensorShapeVector axes;
+  if (raw_axes.empty()) {
+    // axes are omitted, they are set to[0, ..., ndim - 1]
+    axes.reserve(raw_starts.size());
+    for (int64_t i = 0, limit = raw_starts.size(); i < limit; ++i) {
+      axes.push_back(i);
+    }
+  } else {
+    axes.reserve(raw_axes.size());
+    axes.assign(raw_axes.begin(), raw_axes.end());
   }
 
   // Iterate through the provided axes and override the start/end ranges
-  std::unordered_set<int64_t> unique_axes;
-  const auto& dimension_count = compute_metadata.input_dimensions_.size();
-  for (size_t axis_index = 0, axes_count = axes.size(); axis_index < axes_count; ++axis_index) {
+  using AxesSet = InlinedHashSet<int64_t>;
+  const auto axes_count = axes.size();
+  AxesSet unique_axes;
+  unique_axes.reserve(axes_count);
+
+  const auto dimension_count = compute_metadata.input_dimensions_.size();
+  for (size_t axis_index = 0; axis_index < axes_count; ++axis_index) {
     const auto axis = HandleNegativeAxis(axes[axis_index], dimension_count);  // handle negative and enforce axis is valid
     if (axis >= static_cast<int64_t>(dimension_count) || axis < 0)
       return Status(common::ONNXRUNTIME, common::INVALID_ARGUMENT, "'axes' has an axis outside of the tensor dimension count");
-    if (unique_axes.find(axis) != unique_axes.end())
+    auto p = unique_axes.insert(axis);
+    if (!p.second)
       return Status(common::ONNXRUNTIME, common::INVALID_ARGUMENT, "'axes' has duplicates");
-    unique_axes.insert(axis);
-    const auto dim_value = compute_metadata.input_dimensions_[axis];
+
+    const auto dim_value = compute_metadata.input_dimensions_[onnxruntime::narrow<size_t>(axis)];
 
     // process start
     auto start = raw_starts[axis_index];
     if (start < 0)
       start += dim_value;
-    compute_metadata.starts_[axis] = std::clamp(start, int64_t{0}, dim_value);
+    compute_metadata.starts_[onnxruntime::narrow<size_t>(axis)] = std::clamp(start, int64_t{0}, dim_value);
 
     // process end
     auto end = raw_ends[axis_index];
     if (end < 0)
       end += dim_value;
-    compute_metadata.ends_[axis] = std::clamp(end, int64_t{0}, dim_value);
+    compute_metadata.ends_[onnxruntime::narrow<size_t>(axis)] = std::clamp(end, int64_t{0}, dim_value);
 
     // find output dim value for this axis
-    const auto temp = compute_metadata.ends_[axis] - compute_metadata.starts_[axis];
+    const auto temp = compute_metadata.ends_[onnxruntime::narrow<size_t>(axis)] - compute_metadata.starts_[onnxruntime::narrow<size_t>(axis)];
     if (temp < 0)
-      compute_metadata.output_dims_[axis] = 0;
+      compute_metadata.output_dims_[onnxruntime::narrow<size_t>(axis)] = 0;
     else
-      compute_metadata.output_dims_[axis] = temp;
+      compute_metadata.output_dims_[onnxruntime::narrow<size_t>(axis)] = temp;
   }
 
   return Status::OK();
@@ -60,49 +73,67 @@ inline Status PrepareForComputeHelper(const std::vector<int64_t>& raw_starts,
 
 // compute output_dims with steps (Slice V10)
 // Please note this will not Flatten the output shape
-inline Status PrepareForComputeHelper(const std::vector<int64_t>& raw_starts,
-                                      const std::vector<int64_t>& raw_ends,
-                                      const std::vector<int64_t>& raw_axes,
-                                      const std::vector<int64_t>& raw_steps,
+inline Status PrepareForComputeHelper(const gsl::span<const int64_t>& raw_starts,
+                                      const gsl::span<const int64_t>& raw_ends,
+                                      const gsl::span<const int64_t>& raw_axes,
+                                      const gsl::span<const int64_t>& raw_steps,
                                       SliceOp::PrepareForComputeMetadata& compute_metadata) {
   // Initialize axes to the provided axes attribute or to the default sequence
-  std::vector<int64_t> axes(raw_axes);
-
-  if (axes.empty()) {
+  TensorShapeVector axes;
+  if (raw_axes.empty()) {
     // axes are omitted, they are set to[0, ..., ndim - 1]
-    axes.resize(raw_starts.size());
-    std::iota(axes.begin(), axes.end(), 0);
+    axes.reserve(raw_starts.size());
+    for (int64_t i = 0, limit = raw_starts.size(); i < limit; ++i) {
+      axes.push_back(i);
+    }
+  } else {
+    axes.assign(raw_axes.begin(), raw_axes.end());
   }
 
   // Iterate through the provided axes and override the start/end/steps ranges
-  std::unordered_set<int64_t> unique_axes;
-  const auto& dimension_count = compute_metadata.input_dimensions_.size();
-  for (size_t axis_index = 0, axes_count = axes.size(); axis_index < axes_count; ++axis_index) {
+  using AxesSet = InlinedHashSet<int64_t>;
+  const auto axes_count = axes.size();
+  AxesSet unique_axes;
+  unique_axes.reserve(axes_count);
+
+  const auto dimension_count = compute_metadata.input_dimensions_.size();
+  for (size_t axis_index = 0; axis_index < axes_count; ++axis_index) {
     const auto axis = axes[axis_index] < 0 ? axes[axis_index] + static_cast<int64_t>(dimension_count) : axes[axis_index];
     if (axis >= static_cast<int64_t>(dimension_count) || axis < 0)
       return Status(common::ONNXRUNTIME, common::INVALID_ARGUMENT, "'axes' has an axis outside of the tensor dimension count");
-    if (unique_axes.find(axis) != unique_axes.end())
+    auto p = unique_axes.insert(axis);
+    if (!p.second)
       return Status(common::ONNXRUNTIME, common::INVALID_ARGUMENT, "'axes' has duplicates");
-    unique_axes.insert(axis);
-    const auto dim_value = compute_metadata.input_dimensions_[axis];
+    const auto dim_value = compute_metadata.input_dimensions_[onnxruntime::narrow<size_t>(axis)];
 
     // process step
     auto step = axis_index < raw_steps.size() ? raw_steps[axis_index] : 1;
+    if (step == 0)
+      return Status(common::ONNXRUNTIME, common::INVALID_ARGUMENT, "'step' value cannot be 0");
+
+    if (dim_value == 0) {
+      // shape with empty dim. only output_dims_ matters but set everything for completeness
+      compute_metadata.steps_[onnxruntime::narrow<size_t>(axis)] = step;
+      compute_metadata.starts_[onnxruntime::narrow<size_t>(axis)] = 0;
+      compute_metadata.ends_[onnxruntime::narrow<size_t>(axis)] = 0;
+      compute_metadata.output_dims_[onnxruntime::narrow<size_t>(axis)] = 0;
+      continue;
+    }
+
     // clamp step to avoid overflow if there's a stupidly large value (which will be multiplied in SliceImpl)
     // as long as the clamped value is >= the size of the dimension a single step will push us past the end
     step = std::clamp(step, -dim_value, dim_value);
-    if (step == 0)
-      return Status(common::ONNXRUNTIME, common::INVALID_ARGUMENT, "'step' value cannot be 0");
-    compute_metadata.steps_[axis] = step;
+
+    compute_metadata.steps_[onnxruntime::narrow<size_t>(axis)] = step;
 
     // process start
     auto start = raw_starts[axis_index];
     if (start < 0)
       start += dim_value;
     if (step < 0)
-      compute_metadata.starts_[axis] = std::clamp(start, int64_t{0}, dim_value - 1);
+      compute_metadata.starts_[onnxruntime::narrow<size_t>(axis)] = std::clamp(start, int64_t{0}, dim_value - 1);
     else
-      compute_metadata.starts_[axis] = std::clamp(start, int64_t{0}, dim_value);
+      compute_metadata.starts_[onnxruntime::narrow<size_t>(axis)] = std::clamp(start, int64_t{0}, dim_value);
 
     // process end
     auto end = raw_ends[axis_index];
@@ -121,14 +152,14 @@ inline Status PrepareForComputeHelper(const std::vector<int64_t>& raw_starts,
         end = std::clamp(end, int64_t{0}, dim_value);
     }
 
-    compute_metadata.ends_[axis] = end;
+    compute_metadata.ends_[onnxruntime::narrow<size_t>(axis)] = end;
 
     // find output dim value for this axis
-    const auto temp = static_cast<int64_t>(ceil(1.0 * (compute_metadata.ends_[axis] - compute_metadata.starts_[axis]) / step));
+    const auto temp = static_cast<int64_t>(ceil(1.0 * (compute_metadata.ends_[onnxruntime::narrow<size_t>(axis)] - compute_metadata.starts_[onnxruntime::narrow<size_t>(axis)]) / step));
     if (temp < 0)
-      compute_metadata.output_dims_[axis] = 0;
+      compute_metadata.output_dims_[onnxruntime::narrow<size_t>(axis)] = 0;
     else
-      compute_metadata.output_dims_[axis] = temp;
+      compute_metadata.output_dims_[onnxruntime::narrow<size_t>(axis)] = temp;
   }
 
   return Status::OK();

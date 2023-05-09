@@ -19,13 +19,13 @@ using namespace ONNX_NAMESPACE;
 namespace onnxruntime {
 namespace test {
 
-//T must be float for double, and it must match with the 'type' argument
+// T must be float for double, and it must match with the 'type' argument
 template <typename T>
 void TestUnpackFloatTensor(TensorProto_DataType type, const Path& model_path) {
   TensorProto float_tensor_proto;
   float_tensor_proto.set_data_type(type);
   T f[4] = {1.1f, 2.2f, 3.3f, 4.4f};
-  const size_t len = sizeof(T) * 4;
+  constexpr size_t len = sizeof(T) * 4;
   char rawdata[len];
   for (int i = 0; i < 4; ++i) {
     memcpy(rawdata + i * sizeof(T), &(f[i]), sizeof(T));
@@ -135,7 +135,7 @@ void CreateTensorWithExternalData(TensorProto_DataType type, const std::vector<T
   // set the tensor_proto to reference this external data
   onnx::StringStringEntryProto* location = tensor_proto.mutable_external_data()->Add();
   location->set_key("location");
-  location->set_value(ToMBString(filename));
+  location->set_value(ToUTF8String(filename));
   tensor_proto.mutable_dims()->Add(test_data.size());
   tensor_proto.set_data_location(onnx::TensorProto_DataLocation_EXTERNAL);
   tensor_proto.set_data_type(type);

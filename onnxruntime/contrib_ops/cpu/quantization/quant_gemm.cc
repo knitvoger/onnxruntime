@@ -4,7 +4,7 @@
 #include "core/common/safeint.h"
 #include "core/providers/cpu/math/gemm_base.h"
 #include "core/providers/cpu/math/gemm_helper.h"
-#include "core/providers/cpu/math/matmul_integer_base.h"
+#include "core/providers/cpu/quantization/matmul_integer_base.h"
 #include "core/quantization/quantization.h"
 #include "core/util/math_cpuonly.h"
 
@@ -32,7 +32,7 @@ class QGemm : protected GemmBase, public MatMulIntegerBase {
     size_t N = SafeInt<size_t>(helper.N());
     size_t K = SafeInt<size_t>(helper.K());
 
-    //validate scales and zero points
+    // validate scales and zero points
     const auto* a_zp = context->Input<Tensor>(IN_A_ZERO_POINT);
     const auto* b_zp = context->Input<Tensor>(IN_B_ZERO_POINT);
     const auto* y_zp = context->Input<Tensor>(IN_Y_ZERO_POINT);
@@ -44,15 +44,17 @@ class QGemm : protected GemmBase, public MatMulIntegerBase {
     AllocatorPtr allocator;
     ORT_RETURN_IF_ERROR(context->GetTempSpaceAllocator(&allocator));
 
-    BufferUniquePtr a_trans_buffer;
-    const uint8_t* a_data = a->template Data<uint8_t>();
+    bool a_is_signed = a->IsDataType<int8_t>();
+    const uint8_t* a_data = static_cast<const uint8_t*>(a->DataRaw());
+
+    std::unique_ptr<Tensor> a_trans_buffer;
     if (trans_A_ == CblasTrans) {
       a_data = quantization::TransPoseInputData(a_data, a_trans_buffer, allocator, K, M);
     }
 
     bool b_is_signed;
     const uint8_t* b_data = nullptr;
-    BufferUniquePtr b_trans_buffer;
+    std::unique_ptr<Tensor> b_trans_buffer;
     if (nullptr == b) {
       b_data = static_cast<const uint8_t*>(packed_b_.get());
       b_is_signed = b_is_signed_;
@@ -69,25 +71,26 @@ class QGemm : protected GemmBase, public MatMulIntegerBase {
 
     // prepare output buffer of GEMM
     int32_t* gemm_output_data = nullptr;
-    BufferUniquePtr gemm_output_buffer;
+    std::unique_ptr<Tensor> gemm_output_buffer;
     bool need_requant = y_scale != nullptr;
     if (need_requant) {
-      gemm_output_data = static_cast<int32_t*>(allocator->Alloc(SafeInt<size_t>(M * N) * sizeof(int32_t)));
-      gemm_output_buffer.reset(gemm_output_data);
+      TensorShape outputshape{static_cast<int64_t>(M), static_cast<int64_t>(N)};
+      gemm_output_buffer = std::make_unique<Tensor>(DataTypeImpl::GetType<int32_t>(), outputshape, allocator);
+      gemm_output_data = gemm_output_buffer->MutableData<int32_t>();
     } else {
       gemm_output_data = static_cast<int32_t*>(y->MutableDataRaw());
     }
 
     if (c != nullptr) {
-      GemmBroadcastBias(M, N, 1.f, c->template Data<int32_t>(), &(c->Shape()), gemm_output_data);
+      GemmBroadcastBias(M, N, 1.f, c->Data<int32_t>(), &(c->Shape()), gemm_output_data);
     }
 
-    MLAS_GEMM_U8X8_SHAPE_PARAMS gemm_shape{M, N, K, b_is_signed, c != nullptr};
-    MLAS_GEMM_U8X8_DATA_PARAMS gemm_param;
+    MLAS_GEMM_QUANT_SHAPE_PARAMS gemm_shape{M, N, K, a_is_signed, b_is_signed, c != nullptr};
+    MLAS_GEMM_QUANT_DATA_PARAMS gemm_param;
 
     gemm_param.A = a_data;
     gemm_param.lda = gemm_shape.K;
-    gemm_param.ZeroPointA = *(a_zp->template Data<uint8_t>());
+    gemm_param.ZeroPointA = *(static_cast<const uint8_t*>(a_zp->DataRaw()));
 
     gemm_param.B = b_data;
     gemm_param.ldb = gemm_shape.N;
@@ -161,13 +164,13 @@ class QGemm : protected GemmBase, public MatMulIntegerBase {
 
   std::vector<float> ComputeOutputScale(const Tensor* a_scale, const Tensor* b_scale, const Tensor* y_scale) const {
     const int64_t output_scale_size = b_scale->Shape().Size();
-    std::vector<float> output_scales(output_scale_size);
-    auto a_scale_value = *(a_scale->template Data<float>());
-    const auto* b_scale_data = b_scale->template Data<float>();
+    std::vector<float> output_scales(onnxruntime::narrow<size_t>(output_scale_size));
+    auto a_scale_value = *(a_scale->Data<float>());
+    const auto* b_scale_data = b_scale->Data<float>();
     for (int64_t i = 0; i < output_scale_size; i++) {
-      output_scales[i] = (alpha_ * a_scale_value * b_scale_data[i]);
+      output_scales[onnxruntime::narrow<size_t>(i)] = (alpha_ * a_scale_value * b_scale_data[i]);
       if (nullptr != y_scale) {
-        output_scales[i] /= *(y_scale->template Data<float>());
+        output_scales[onnxruntime::narrow<size_t>(i)] /= *(y_scale->Data<float>());
       }
     }
     return output_scales;
@@ -177,17 +180,20 @@ class QGemm : protected GemmBase, public MatMulIntegerBase {
                                size_t out_lda,
                                const std::vector<float>& output_scales,
                                Tensor* y,
-                               MLAS_GEMM_U8X8_DATA_PARAMS& gemm_param,
+                               MLAS_GEMM_QUANT_DATA_PARAMS& gemm_param,
                                std::unique_ptr<MLAS_QGEMM_SCALE_BIAS_OUTPUT_PROCESSOR>& scale_bias_proc_ptr,
                                std::unique_ptr<MLAS_QGEMM_REQUANT_OUTPUT_PROCESSOR>& requant_proc_ptr) {
     if (nullptr != y_zp) {
+      bool is_y_signed = y->IsDataType<int8_t>();
+      int32_t y_zero_point = is_y_signed ? *y_zp->Data<int8_t>() : *y_zp->Data<uint8_t>();
       requant_proc_ptr = std::make_unique<MLAS_QGEMM_REQUANT_OUTPUT_PROCESSOR>(
-          static_cast<uint8_t*>(y->MutableDataRaw()),
+          y->MutableDataRaw(),
           out_lda,
           nullptr,
           output_scales.data(),
           output_scales.size() > 1,
-          *y_zp->template Data<uint8_t>());
+          y_zero_point,
+          is_y_signed);
       gemm_param.OutputProcessor = requant_proc_ptr.get();
     } else {
       scale_bias_proc_ptr = std::make_unique<MLAS_QGEMM_SCALE_BIAS_OUTPUT_PROCESSOR>(
@@ -215,6 +221,21 @@ ONNX_OPERATOR_TYPED_KERNEL_EX(
         .TypeConstraint("TC", DataTypeImpl::GetTensorType<int32_t>())
         .TypeConstraint("TYZ", DataTypeImpl::GetTensorType<uint8_t>())
         .TypeConstraint("TY", {DataTypeImpl::GetTensorType<float>(), DataTypeImpl::GetTensorType<uint8_t>()}),
+    QGemm);
+
+ONNX_OPERATOR_TYPED_KERNEL_EX(
+    QGemm,
+    kMSDomain,
+    1,
+    int8_t,
+    kCpuExecutionProvider,
+    KernelDefBuilder()
+        .TypeConstraint("T", DataTypeImpl::GetTensorType<float>())
+        .TypeConstraint("TA", DataTypeImpl::GetTensorType<int8_t>())
+        .TypeConstraint("TB", DataTypeImpl::GetTensorType<int8_t>())
+        .TypeConstraint("TC", DataTypeImpl::GetTensorType<int32_t>())
+        .TypeConstraint("TYZ", DataTypeImpl::GetTensorType<int8_t>())
+        .TypeConstraint("TY", {DataTypeImpl::GetTensorType<float>(), DataTypeImpl::GetTensorType<int8_t>()}),
     QGemm);
 
 }  // namespace contrib

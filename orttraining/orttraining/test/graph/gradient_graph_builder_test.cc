@@ -43,7 +43,7 @@ static Status BuildBackPropGraph(
   SessionOptions so{};
   TrainingSession training_session{so, *env};
 
-  std::cout << "Loading source model file = " << ToMBString(forward_model_file) << "\n";
+  std::cout << "Loading source model file = " << ToUTF8String(forward_model_file) << "\n";
 
   ORT_RETURN_IF_ERROR(training_session.Load(forward_model_file));
 
@@ -183,7 +183,7 @@ TEST(GradientGraphBuilderTest, TrainingSession_Basic) {
 TEST(GradientGraphBuilderTest, GraphTransformation_WithGist) {
   // Setup training session configuration
   auto config = MakeBasicTrainingConfig();
-  const int op_type_max = 9;
+  constexpr int op_type_max = 9;
   const vector<std::string> compr_type_vec = {"GistBinarize", "GistPack8", "GistPack16", "GistPackMsfp15"};
 
   PathString backprop_model_file;
@@ -230,7 +230,7 @@ TEST(GradientGraphBuilderTest, TrainingSession_WithGist) {
   SessionOptions so{};
   TrainingSession training_session{so, *env};
 
-  std::cout << "Loading source model file = " << ToMBString(forward_model_file) << "\n";
+  std::cout << "Loading source model file = " << ToUTF8String(forward_model_file) << "\n";
 
   ORT_THROW_IF_ERROR(training_session.Load(forward_model_file));
 
@@ -569,7 +569,7 @@ TEST(GradientGraphBuilderTest, TrainingSession_BertToy) {
                         /*nsp_loss*/ "nsp_loss"});
   config.weight_names_to_not_train = {
       "position_01",            // Slice's dat input
-      "op_min_ends_expand_10",  //op_min_ends_expand_10
+      "op_min_ends_expand_10",  // op_min_ends_expand_10
   };
   config.immutable_weights = {
       {"Div", {{1, 8.0f}, {1, 1.4142135381698608f}}},
@@ -840,7 +840,7 @@ class PipelineSplitter {
     }
 
     if (wait_pipeline_np) {
-      //add dependencies on the first wait
+      // add dependencies on the first wait
       auto* wait_np = wait_data_np ? wait_data_np : wait_pipeline_np;
       for (const auto& dep : dependencies) {
         *wait_np->mutable_input()->Add() = dep;
@@ -1299,7 +1299,7 @@ void OverwritePipelineRank(const TrainingSession::TrainingConfiguration& config,
 TEST(GradientGraphBuilderTest, PipelineOnlinePartition_bert_tiny) {
   const auto model_path = ORT_TSTR("testdata/bert_toy_optimized.onnx");
 
-  const size_t total_partition_count = 3;
+  constexpr size_t total_partition_count = 3;
   TrainingSession::TrainingConfiguration::PipelineConfiguration pipe{};
   pipe.do_partition = true;
 
@@ -1344,7 +1344,7 @@ TEST(GradientGraphBuilderTest, PipelineOnlinePartition_bert_tiny) {
       // Add weight_names_to_not_train to avoid generating backward graph on those tensor
       config.weight_names_to_not_train = {
           "position_01",            // Slice's dat input
-          "op_min_ends_expand_10",  //op_min_ends_expand_10
+          "op_min_ends_expand_10",  // op_min_ends_expand_10
       };
       pipe.partitioned_model_path = partition_file;
       config.pipeline_config = pipe;
@@ -1657,13 +1657,13 @@ TEST(GradientGraphBuilderTest, TrainingSession_PipelineTransform_base) {
 
 TEST(GradientGraphBuilderTest, TrainingSession_WithPipeline) {
   auto config = MakeBasicTrainingConfig();
-  //config.set_gradients_as_graph_outputs = true;
+  // config.set_gradients_as_graph_outputs = true;
   PathString backprop_model_file;
   ASSERT_STATUS_OK(BuildBackPropGraph(ORIGINAL_MODEL_PATH, config, backprop_model_file));
 
   // cut the model using outputs
   const std::vector<PipelineSplitter::CutInfo> cuts = {
-      //sub model 0
+      // sub model 0
       {{{"T1", "T2", "T3"},
         {"X"},
         {"T3"},
@@ -1867,7 +1867,7 @@ TEST(GradientGraphBuilderTest, TrainingSession_WithPipeline) {
   const std::vector<int64_t> start_ids = {100, 200, 300};
   const std::vector<int64_t> expected_end_ids = {112, 212, 312};
   const size_t num_stages = start_ids.size();
-  const int num_batches = 6;
+  constexpr int num_batches = 6;
   std::vector<PipelineBatchInfo> plan(num_batches);
   PipelineBatchPlanner planner;
   planner.GenerateOneFWOneBWTimeline(num_stages, num_batches);

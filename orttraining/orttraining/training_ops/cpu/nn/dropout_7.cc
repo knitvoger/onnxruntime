@@ -2,11 +2,11 @@
 // Licensed under the MIT License.
 
 #include "orttraining/training_ops/cpu/nn/dropout_7.h"
-#include "core/util/math_cpuonly.h"
+#include "core/framework/math.h"
 
 namespace onnxruntime {
 
-#if defined(ENABLE_TRAINING) || defined(ENABLE_TRAINING_OPS)
+#if defined(ENABLE_TRAINING_OPS)
 ONNX_CPU_OPERATOR_KERNEL(
     Dropout,
     7,
@@ -34,7 +34,7 @@ Status Dropout_7::Compute(OpKernelContext* context) const {
     const void* source = X.DataRaw(X_type);
     void* target = Y.MutableDataRaw(X_type);
     if (target != source) {
-      //If source and target pointers are not equal, we need to copy the data.
+      // If source and target pointers are not equal, we need to copy the data.
       memcpy(target, source, shape.Size() * X_type->Size());
     }
   } else {

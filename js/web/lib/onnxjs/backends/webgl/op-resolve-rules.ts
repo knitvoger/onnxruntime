@@ -8,25 +8,23 @@ import * as binaryOps from './ops/binary-op';
 import {cast, parseCastAttributes} from './ops/cast';
 import {concat, parseConcatAttributes} from './ops/concat';
 import {conv, parseConvAttributes} from './ops/conv';
+import {convTranspose, parseConvTransposeAttributes} from './ops/conv-transpose';
 import {depthToSpace, parseDepthToSpaceAttributes} from './ops/depth-to-space';
 import {flatten, parseFlattenAttributes} from './ops/flatten';
 import {gather, parseGatherAttributes} from './ops/gather';
 import {gemm, parseGemmAttributesV11, parseGemmAttributesV7} from './ops/gemm';
 import {imageScaler, parseImageScalerAttributes} from './ops/image-scaler';
 import {instanceNormalization, parseInstanceNormalizationAttributes} from './ops/instance-normalization';
+import {lrn, parseLrnAttributes} from './ops/lrn';
 import {matMul, parseMatMulAttributes} from './ops/matmul';
 import {padV11, padV2, parsePadAttributesV11, parsePadAttributesV2} from './ops/pad';
-import {averagePool, parseAveragePoolAttributes} from './ops/pool';
-import {globalAveragePool, parseGlobalAveragePoolAttributes} from './ops/pool';
-import {maxPool, parseMaxPoolAttributes} from './ops/pool';
-import {globalMaxPool} from './ops/pool';
-import {reduceLogSum, reduceLogSumSquare, reduceMax, reduceMean, reduceMin, reduceProd, reduceSum} from './ops/reduce';
-import {parseReduceAttributes} from './ops/reduce';
+import {averagePool, globalAveragePool, globalMaxPool, maxPool, parseAveragePoolAttributes, parseGlobalAveragePoolAttributes, parseMaxPoolAttributes} from './ops/pool';
+import {parseReduceAttributes, reduceLogSum, reduceLogSumSquare, reduceMax, reduceMean, reduceMin, reduceProd, reduceSum} from './ops/reduce';
 import {reshape} from './ops/reshape';
 import {parseResizeAttributesV10, parseResizeAttributesV11, resize} from './ops/resize-packed';
 import {shape} from './ops/shape';
 import {parseSliceAttributes, slice, sliceV10} from './ops/slice';
-import {parseSoftmaxAttributes, softmax} from './ops/softmax';
+import {parseSoftmaxAttributes, parseSoftmaxAttributesV13, softmax, softmaxV13} from './ops/softmax';
 import {parseSplitAttributes, split} from './ops/split';
 import {parseSqueezeAttributes, squeeze, squeezeV13} from './ops/squeeze';
 import {sum} from './ops/sum';
@@ -52,6 +50,7 @@ export const WEBGL_OP_RESOLVE_RULES: readonly OpSet.ResolveRule[] = [
   ['Clip', '', '11+', unaryOps.clipV11],
   ['Concat', '', '4+', concat, parseConcatAttributes],
   ['Conv', '', '1+', conv, parseConvAttributes],
+  ['ConvTranspose', '', '1+', convTranspose, parseConvTransposeAttributes],
   ['Cos', '', '7+', unaryOps.cos],
   ['Div', '', '7+', binaryOps.div],
   ['Dropout', '', '7+', unaryOps.identity],
@@ -61,6 +60,7 @@ export const WEBGL_OP_RESOLVE_RULES: readonly OpSet.ResolveRule[] = [
   ['Exp', '', '6+', unaryOps.exp],
   ['Flatten', '', '1+', flatten, parseFlattenAttributes],
   ['Floor', '', '6+', unaryOps.floor],
+  ['FusedConv', 'com.microsoft', '1+', conv, parseConvAttributes],
   ['Gather', '', '1+', gather, parseGatherAttributes],
   ['Gemm', '', '7-10', gemm, parseGemmAttributesV7],
   ['Gemm', '', '11+', gemm, parseGemmAttributesV11],
@@ -72,6 +72,7 @@ export const WEBGL_OP_RESOLVE_RULES: readonly OpSet.ResolveRule[] = [
   ['InstanceNormalization', '', '6+', instanceNormalization, parseInstanceNormalizationAttributes],
   ['LeakyRelu', '', '6+', unaryOps.leakyRelu, unaryOps.parseLeakyReluAttributes],
   ['Less', '', '7+', binaryOps.less],
+  ['LRN', '', '1+', lrn, parseLrnAttributes],
   ['Log', '', '6+', unaryOps.log],
   ['MatMul', '', '1+', matMul, parseMatMulAttributes],
   // TODO: support new attributes for MaxPool-8 and MaxPool-10
@@ -102,6 +103,7 @@ export const WEBGL_OP_RESOLVE_RULES: readonly OpSet.ResolveRule[] = [
   ['Slice', '', '1-9', slice, parseSliceAttributes],
   // The "semantic" meaning of axis has changed in opset-13.
   ['Softmax', '', '1-12', softmax, parseSoftmaxAttributes],
+  ['Softmax', '', '13+', softmaxV13, parseSoftmaxAttributesV13],
   // 'Split' operator has an optional attribute 'split'
   // this attribute determines how the specified axis of input data is split.
   // When the attribute is missing, we need the count of number of outputs

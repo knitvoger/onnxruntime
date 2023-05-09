@@ -47,7 +47,7 @@ Status AdamOptimizerBuilder::Build(
       const auto uc_state_it = initial_states.find(ADAM_UC_PREFIX);
       if (uc_state_it != initial_states.end()) {
         const auto& init_tensor = uc_state_it->second.Get<Tensor>();
-        ORT_THROW_IF_ERROR(IsMatchingTypeAndShape(init_tensor, ONNX_NAMESPACE::TensorProto_DataType_INT64, {1}));
+        ORT_THROW_IF_ERROR(IsMatchingTypeAndShape(init_tensor, ONNX_NAMESPACE::TensorProto_DataType_INT64, TensorShapeVector{1}));
         uc_tensor_proto = utils::TensorToTensorProto(init_tensor, update_count_string);
       } else {
         uc_tensor_proto = CreateTensorProto<int64_t>(update_count_string, 1);
@@ -90,10 +90,10 @@ Status AdamOptimizerBuilder::Build(
         // Update moment initializer with init value
         const auto moment_state_it = initial_states.find(moments_prefix);
         if (moment_state_it != initial_states.end()) {
-          //update moment_tensor_proto
+          // update moment_tensor_proto
           const auto& init_tensor = moment_state_it->second.Get<Tensor>();
 
-          //TODO: need to support float -> float16 and float16-> float conversion
+          // TODO: need to support float -> float16 and float16-> float conversion
           ORT_THROW_IF_ERROR(IsMatchingTypeAndShape(init_tensor, element_type, weight_dims));
           moment_tensor_proto = utils::TensorToTensorProto(init_tensor, gradient_moment_name);
         } else if (opt_configs[i].use_mixed_precision_moments) {
@@ -132,7 +132,7 @@ Status AdamOptimizerBuilder::Build(
         output_args.push_back(ArgDef());
       }
       if (!opt_configs[i].loss_scale_input_name.empty()) {
-        input_args.emplace_back(ArgDef(opt_configs[i].loss_scale_input_name, graph_defs.CreateTypeProto({1}, ONNX_NAMESPACE::TensorProto_DataType_FLOAT)));
+        input_args.emplace_back(ArgDef(opt_configs[i].loss_scale_input_name, graph_defs.CreateTypeProto(std::array<const int64_t, 1>{1}, ONNX_NAMESPACE::TensorProto_DataType_FLOAT)));
       } else {
         input_args.emplace_back(ArgDef());
       }

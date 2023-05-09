@@ -21,14 +21,14 @@ ONNX_OPERATOR_KERNEL_EX(
                                     DataTypeImpl::GetTensorType<int64_t>()}),
     GatherElementsGrad);
 
-#define TYPED_GRAD_FUNCTION_CALL(T)                                             \
-  if (T_type == DataTypeImpl::GetType<T>()) {                                   \
-    if (Tind_type == DataTypeImpl::GetType<int32_t>()) {                        \
-      return GatherElementsGradImpl<int32_t, T>(indices_tensor, dY, axis, dX);  \
-    }                                                                           \
-    if (Tind_type == DataTypeImpl::GetType<int64_t>()) {                        \
-      return GatherElementsGradImpl<int64_t, T>(indices_tensor, dY, axis, dX);  \
-    }                                                                           \
+#define TYPED_GRAD_FUNCTION_CALL(T)                                            \
+  if (T_type == DataTypeImpl::GetType<T>()) {                                  \
+    if (Tind_type == DataTypeImpl::GetType<int32_t>()) {                       \
+      return GatherElementsGradImpl<int32_t, T>(indices_tensor, dY, axis, dX); \
+    }                                                                          \
+    if (Tind_type == DataTypeImpl::GetType<int64_t>()) {                       \
+      return GatherElementsGradImpl<int64_t, T>(indices_tensor, dY, axis, dX); \
+    }                                                                          \
   }
 
 Status GatherElementsGrad::Compute(OpKernelContext* context) const {
@@ -66,7 +66,7 @@ Status GatherElementsGrad::Compute(OpKernelContext* context) const {
   for (size_t i = 0; i < output_dims.size(); ++i) {
     // For all axes except the axis of interest, make sure that the corresponding 'indices' shape
     // value is within bounds of the corresponding 'data' shape.
-    if (static_cast<int64_t>(i) != axis_ && output_dims[i] < indices_dims[i]) {
+    if (static_cast<int64_t>(i) != axis && output_dims[i] < indices_dims[i]) {
       return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT, "Indices dim=", indices_dims[i], " at pos=", i,
                              " is greater than Output dim=", output_dims[i]);
     }

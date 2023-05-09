@@ -29,27 +29,27 @@ ONNX_OPERATOR_KERNEL_EX(
                                                       DataTypeImpl::GetTensorType<int32_t>()}),
     EyeLike);
 
-#define TYPED_FUNCTION_CALL(T)                                                              \
-  EyeLikeImpl<typename ToCudaType<T>::MappedType>(                                          \
-      Stream(),                                                                             \
-      offset,                                                                               \
-      dim1 + 1,                                                                             \
-      reinterpret_cast<typename ToCudaType<T>::MappedType*>(T2->template MutableData<T>()), \
-      diag_count);                                                                          \
+#define TYPED_FUNCTION_CALL(T)                                                     \
+  EyeLikeImpl<typename ToCudaType<T>::MappedType>(                                 \
+      Stream(context),                                                             \
+      offset,                                                                      \
+      dim1 + 1,                                                                    \
+      reinterpret_cast<typename ToCudaType<T>::MappedType*>(T2->MutableData<T>()), \
+      diag_count);                                                                 \
   break;
 
 Status EyeLike::ComputeInternal(OpKernelContext* context) const {
   const auto* T1 = context->Input<Tensor>(0);
   ORT_ENFORCE(T1 != nullptr);
 
-  const std::vector<int64_t>& input_dims = T1->Shape().GetDims();
+  auto input_dims = T1->Shape().GetDims();
   if (input_dims.size() != 2) {
     return Status(ONNXRUNTIME, INVALID_ARGUMENT, "EyeLike : Input tensor dimension is not 2");
   }
 
   // set output tensor shape same as input tensor and set all values to zero
   auto* T2 = context->Output(0, input_dims);
-  CUDA_RETURN_IF_ERROR(cudaMemsetAsync(T2->MutableDataRaw(), 0, T2->SizeInBytes(), Stream()));
+  CUDA_RETURN_IF_ERROR(cudaMemsetAsync(T2->MutableDataRaw(), 0, T2->SizeInBytes(), Stream(context)));
   auto dim0 = input_dims[0];
   auto dim1 = input_dims[1];
 

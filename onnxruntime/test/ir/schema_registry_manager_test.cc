@@ -85,16 +85,16 @@ TEST(SchemaRegistryManager, OpsetRegTest) {
 
   // Register the second version of the same op-set on the second registry, overriding one operator
   ASSERT_STATUS_OK(registry2->RegisterOpSet(schemaV2, "Domain1", 1, 2));
-  //Now the registry1 has: (op1,domain1,version1), (op2,domain1,version1), (op2,domain2,version1)
-  //registry2 has:(op1,domain1,version2)
+  // Now the registry1 has: (op1,domain1,version1), (op2,domain1,version1), (op2,domain2,version1)
+  // registry2 has:(op1,domain1,version2)
   ASSERT_TRUE(registry2->GetSchema("Op1", 1, "Domain1") == nullptr);
   ASSERT_TRUE(registry2->GetSchema("Op1", 2, "Domain1") != nullptr);
-  //Fail because this registery doesn't have the information of opset3
+  // Fail because this registery doesn't have the information of opset3
   ASSERT_TRUE(registry2->GetSchema("Op1", 3, "Domain1") == nullptr);
 
   std::shared_ptr<onnxruntime::OnnxRuntimeOpSchemaRegistry> registry3 = std::make_shared<OnnxRuntimeOpSchemaRegistry>();
   ASSERT_STATUS_OK(registry3->RegisterOpSet(schemaV2, "Domain1", 1, 3));
-  //Now it's ok.
+  // Now it's ok.
   ASSERT_TRUE(registry3->GetSchema("Op1", 3, "Domain1") != nullptr);
 
   ASSERT_TRUE(manager.GetSchema("Op1", 1, "Domain1")->since_version() == 1);
@@ -102,7 +102,7 @@ TEST(SchemaRegistryManager, OpsetRegTest) {
   ASSERT_TRUE(manager.GetSchema("Op2", 1, "Domain1")->since_version() == 1);
   ASSERT_TRUE(manager.GetSchema("Op2", 2, "Domain1")->since_version() == 1);
 
-  // Add a new operator set which is verion 5, with a baseline of version 4, meaning that
+  // Add a new operator set which is version 5, with a baseline of version 4, meaning that
   // there is a gap at version 3.
   std::shared_ptr<onnxruntime::OnnxRuntimeOpSchemaRegistry> registryV5 = std::make_shared<OnnxRuntimeOpSchemaRegistry>();
   manager.RegisterRegistry(registryV5);

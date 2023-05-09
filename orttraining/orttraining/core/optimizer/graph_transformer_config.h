@@ -21,7 +21,12 @@ struct TrainingGraphTransformerConfiguration : public GraphTransformerConfigurat
   bool transformer_layer_recompute{false};
   // Number of layers to apply recompute
   int number_recompute_layers{0};
-  bool allow_layer_norm_mod_precision{false};
+
+  // Enable compute optimizer.
+  bool enable_compute_optimizer{false};
+
+  // Enable label sparsity compute optimization.
+  bool enable_label_sparsity_optimization{false};
 };
 
 }  // namespace training

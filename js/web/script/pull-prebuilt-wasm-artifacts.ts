@@ -8,7 +8,7 @@
 // WebAssembly side, so there is no need to rebuild WebAssembly.
 //
 // It performs the following operations:
-// 1. query build ID for latest successful build on master branch
+// 1. query build ID for latest successful build on main branch
 // 2. query download URL of build artifacts
 // 3. download and unzip the files to folders
 //
@@ -76,15 +76,15 @@ console.log('=== Start to pull WebAssembly artifacts from CI ===');
 downloadJson(
     'https://dev.azure.com/onnxruntime/onnxruntime/_apis/build/builds?api-version=6.1-preview.6' +
         '&definitions=161' +
-        '&resultFilter=succeeded' +
+        '&resultFilter=succeeded%2CpartiallySucceeded' +
         '&$top=1' +
         '&repositoryId=Microsoft/onnxruntime' +
         '&repositoryType=GitHub' +
-        '&branchName=refs/heads/master',
+        '&branchName=refs/heads/main',
     data => {
       const buildId = data.value[0].id;
 
-      console.log(`=== Found latest master build : ${buildId} ===`);
+      console.log(`=== Found latest build on main branch: ${buildId} ===`);
 
       // API reference: https://docs.microsoft.com/en-us/rest/api/azure/devops/build/artifacts/get%20artifact
       downloadJson(
@@ -112,10 +112,14 @@ downloadJson(
                 extractFile(zip, WASM_FOLDER, 'ort-wasm-threaded.wasm', 'Release_wasm');
                 extractFile(zip, WASM_FOLDER, 'ort-wasm-simd.wasm', 'Release_wasm');
                 extractFile(zip, WASM_FOLDER, 'ort-wasm-simd-threaded.wasm', 'Release_wasm');
+                extractFile(zip, WASM_FOLDER, 'ort-wasm-simd.jsep.wasm', 'Release_wasm');
+                extractFile(zip, WASM_FOLDER, 'ort-wasm-simd-threaded.jsep.wasm', 'Release_wasm');
 
                 extractFile(zip, JS_FOLDER, 'ort-wasm.js', 'Release_wasm');
                 extractFile(zip, JS_FOLDER, 'ort-wasm-threaded.js', 'Release_wasm');
                 extractFile(zip, JS_FOLDER, 'ort-wasm-threaded.worker.js', 'Release_wasm');
+                extractFile(zip, JS_FOLDER, 'ort-wasm-simd.jsep.js', 'Release_wasm');
+                extractFile(zip, JS_FOLDER, 'ort-wasm-simd-threaded.jsep.js', 'Release_wasm');
               });
             });
           });

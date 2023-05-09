@@ -116,7 +116,7 @@ bool TransformerMemcpyImpl::ModifyGraph(const KernelRegistryManager& kernel_regi
   InitializedTensorSet initializers_consumed;
   // find defs that require copy
   for (auto& node : graph_.Nodes()) {
-    //as we process the defs, collect all the initializers consumed at the current graph level
+    // as we process the defs, collect all the initializers consumed at the current graph level
     ProcessDefs(node, kernel_registries, initializers_consumed);
   }
 
@@ -189,7 +189,8 @@ void TransformerMemcpyImpl::ProcessDefs(onnxruntime::Node& node, const KernelReg
                                         InitializedTensorSet& initializers_consumed) {
   auto node_provider_type = node.GetExecutionProviderType();
   if ((node_provider_type == provider_) ||
-      (node_provider_type == kCudaExecutionProvider && kTensorrtExecutionProvider == provider_)) {
+      (node_provider_type == kCudaExecutionProvider && kTensorrtExecutionProvider == provider_) ||
+      (node_provider_type == kRocmExecutionProvider && kMIGraphXExecutionProvider == provider_)) {
     provider_nodes_.insert(&node);
     // note KernelCreateInfo might be nullptr for custom kernel
     const KernelCreateInfo* kci = nullptr;
@@ -236,7 +237,8 @@ void TransformerMemcpyImpl::ProcessDefs(onnxruntime::Node& node, const KernelReg
       else
         provider_output_defs_.insert(arg);
     }
-  } else if (node_provider_type != kCudaExecutionProvider && node_provider_type != kTensorrtExecutionProvider) {
+  } else if (node_provider_type != kCudaExecutionProvider && node_provider_type != kTensorrtExecutionProvider &&
+             node_provider_type != kRocmExecutionProvider && node_provider_type != kMIGraphXExecutionProvider) {
     // TODO: copy between devices? i.e. multiple GPUs
     if (node_provider_type != onnxruntime::kCpuExecutionProvider &&
         node_provider_type != onnxruntime::kVitisAIExecutionProvider &&
@@ -253,7 +255,7 @@ void TransformerMemcpyImpl::ProcessDefs(onnxruntime::Node& node, const KernelReg
     // This is because we don't want to add copy nodes on account of implicit
     // inputs to nodes.
     // We will rely on utils::CopyInputsAcrossDevices() to do the job.
-    //for (const auto* arg : node.ImplicitInputDefs()) {
+    // for (const auto* arg : node.ImplicitInputDefs()) {
     //  if (arg->Exists())
     //    non_provider_input_defs_.insert(arg);
     //}
@@ -265,7 +267,7 @@ void TransformerMemcpyImpl::ProcessDefs(onnxruntime::Node& node, const KernelReg
   }
 }
 
-//for non_provider defs, collect the nodes that expect it is provider tensor as input/output.
+// for non_provider defs, collect the nodes that expect it is provider tensor as input/output.
 void TransformerMemcpyImpl::BuildDefsMapping(const onnxruntime::NodeArg* arg, const KernelRegistryManager& kernel_registries) {
   for (auto& it : graph_.Nodes()) {
     if (it.OpType() == "MemcpyFromHost" || it.OpType() == "MemcpyToHost") continue;
@@ -280,7 +282,9 @@ void TransformerMemcpyImpl::BuildDefsMapping(const onnxruntime::NodeArg* arg, co
     if (arg_input_index == -1 && arg_output_index == -1)
       continue;
     auto node_provider_type = it.GetExecutionProviderType();
-    if ((node_provider_type == provider_) || (node_provider_type == kCudaExecutionProvider && kTensorrtExecutionProvider == provider_)) {
+    if ((node_provider_type == provider_) ||
+        (node_provider_type == kCudaExecutionProvider && kTensorrtExecutionProvider == provider_) ||
+        (node_provider_type == kRocmExecutionProvider && kMIGraphXExecutionProvider == provider_)) {
       const KernelCreateInfo* kci = nullptr;
       ORT_IGNORE_RETURN_VALUE(kernel_registries.SearchKernelRegistry(it, &kci));
       if (arg_input_index != -1) {

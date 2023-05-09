@@ -5,7 +5,7 @@
 
 #include "core/common/common.h"
 #include "core/framework/op_kernel.h"
-#include "core/providers/cpu//tensor/concat.h"
+#include "core/providers/cpu/tensor/concat.h"
 
 namespace onnxruntime {
 
@@ -17,4 +17,4 @@ class ConcatFromSequence final : public OpKernel, public ConcatBase {
   Status Compute(OpKernelContext* context) const override;
 };
 
-}  //namespace onnxruntime
+}  // namespace onnxruntime

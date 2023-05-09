@@ -10,13 +10,13 @@
 namespace onnxruntime {
 namespace test {
 TEST(AllocatorTest, CPUAllocatorTest) {
-  auto cpu_arena = TestCPUExecutionProvider()->GetAllocator(0, OrtMemTypeDefault);
+  auto cpu_arena = TestCPUExecutionProvider()->GetAllocator(OrtMemTypeDefault);
 
   ASSERT_STREQ(cpu_arena->Info().name, CPU);
   EXPECT_EQ(cpu_arena->Info().id, 0);
 
   // arena is disabled for CPUExecutionProvider on x86 and JEMalloc
-#if (defined(__amd64__) || defined(_M_AMD64) || defined(__aarch64__) || defined(_M_ARM64)) && !defined(USE_JEMALLOC)
+#if (defined(__amd64__) || defined(_M_AMD64) || defined(__aarch64__) || defined(_M_ARM64)) && !defined(USE_JEMALLOC) && !defined(USE_MIMALLOC)
   EXPECT_EQ(cpu_arena->Info().alloc_type, OrtAllocatorType::OrtArenaAllocator);
 #else
   EXPECT_EQ(cpu_arena->Info().alloc_type, OrtAllocatorType::OrtDeviceAllocator);
@@ -25,14 +25,16 @@ TEST(AllocatorTest, CPUAllocatorTest) {
   size_t size = 1024;
   auto bytes = cpu_arena->Alloc(size);
   EXPECT_TRUE(bytes);
-  //test the bytes are ok for read/write
+  // test the bytes are ok for read/write
   memset(bytes, -1, 1024);
 
   EXPECT_EQ(*((int*)bytes), -1);
   cpu_arena->Free(bytes);
-  //todo: test the used / max api.
+  // todo: test the used / max api.
 }
-
+#if defined(_MSC_VER) && !defined(__clang__)
+#pragma warning(disable : 26400)
+#endif
 // helper class to validate values in Alloc and Free calls made via IAllocator::MakeUniquePtr
 class TestAllocator : public IAllocator {
  public:

@@ -1,23 +1,26 @@
 /**
-* Copyright (c) 2016-present, Facebook, Inc.
-*
-* Licensed under the Apache License, Version 2.0 (the "License");
-* you may not use this file except in compliance with the License.
-* You may obtain a copy of the License at
-*
-*     http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS,
-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific language governing permissions and
-* limitations under the License.
-*/
+ * Copyright (c) 2016-present, Facebook, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 // Modifications Copyright (c) Microsoft.
 
-#include <algorithm>
-#include "core/util/math.h"
 #include "core/util/math_cpuonly.h"
+#include "core/util/math.h"
+#include "core/framework/float16.h"
+
+#include <algorithm>
+#include "core/common/narrow.h"
 #include "core/mlas/inc/mlas.h"
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -431,7 +434,6 @@ void Im2col<T, StorageOrder::NHWC>::operator()(
     int64_t output_count,
     T* data_col,
     T padding_value) {
-
   int64_t mh = output_start / output_w;
   int64_t mw = output_start % output_w;
   for (int64_t mz = output_start; mz < output_start + output_count; mz++) {
@@ -449,7 +451,7 @@ void Im2col<T, StorageOrder::NHWC>::operator()(
             if (is_a_ge_zero_and_a_lt_b(iw, input_w)) {
               // Increase the copy count size to reduce the number of copy calls.
               int64_t batch_w = std::min(kw, input_w - iw);
-              std::memcpy(data_col, data_im + (ih * input_w + iw) * group_channels, gsl::narrow<size_t>(sizeof(T) * batch_w * group_channels));
+              std::memcpy(data_col, data_im + (ih * input_w + iw) * group_channels, narrow<size_t>(sizeof(T) * batch_w * group_channels));
               data_col += batch_w * group_channels;
               iw += batch_w;
               kw -= batch_w;
@@ -464,7 +466,7 @@ void Im2col<T, StorageOrder::NHWC>::operator()(
             if (is_a_ge_zero_and_a_lt_b(iw, input_w)) {
               // N.B. Using std::memcpy helped here over std::copy_n when doing a
               // transform for an image with a small number of group channels.
-              std::memcpy(data_col, data_im + (ih * input_w + iw) * input_channels, gsl::narrow<size_t>(sizeof(T) * group_channels));
+              std::memcpy(data_col, data_im + (ih * input_w + iw) * input_channels, narrow<size_t>(sizeof(T) * group_channels));
               data_col += group_channels;
             } else {
               data_col = std::fill_n(data_col, group_channels, padding_value);
@@ -650,7 +652,9 @@ void Im2col<T, StorageOrder::NHWC>::operator()(
   }
 }
 
+template struct Im2col<int8_t, StorageOrder::NHWC>;
 template struct Im2col<uint8_t, StorageOrder::NHWC>;
+template struct Im2col<MLFloat16, StorageOrder::NHWC>;
 
 template <>
 void Col2im<float, CPUMathUtil, StorageOrder::NCHW>(const float* data_col, int64_t channels, int64_t height,
@@ -665,7 +669,7 @@ void Col2im<float, CPUMathUtil, StorageOrder::NCHW>(const float* data_col, int64
   const int64_t output_hw = output_h * output_w;
   const int64_t hw = height * width;
   const int64_t hwc = hw * channels;
-  Set<float, CPUMathUtil>(gsl::narrow<ptrdiff_t>(hwc), 0, data_im, context);
+  Set<float, CPUMathUtil>(narrow<ptrdiff_t>(hwc), 0, data_im, context);
 
   // Fast path for zero padding and no dilation
   // From Torch, modified THNN_(unfolded_acc)
@@ -753,7 +757,7 @@ void Col2im<float, CPUMathUtil, StorageOrder::NHWC>(const float* data_col, int64
   const int64_t dkernel_w = dilation_w * (kernel_w - 1) + 1;
 
   const int64_t hwc = height * width * channels;
-  Set<float, CPUMathUtil>(gsl::narrow<ptrdiff_t>(hwc), 0, data_im, context);
+  Set<float, CPUMathUtil>(narrow<ptrdiff_t>(hwc), 0, data_im, context);
   int64_t height_col = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
   int64_t width_col = (width + pad_l + pad_r - dkernel_w) / stride_w + 1;
   int64_t h_pad = -pad_t;
@@ -782,7 +786,7 @@ void Col2imNd<float, CPUMathUtil, StorageOrder::NCHW>(const float* data_col, con
                                                       const int64_t* kernel_shape, const int64_t* stride,
                                                       const int64_t* dilation, const int64_t* pad, ptrdiff_t N,
                                                       float* data_img, CPUMathUtil* context) {
-  Set<float, CPUMathUtil>(gsl::narrow<ptrdiff_t>(img_size), 0, data_img, context);
+  Set<float, CPUMathUtil>(narrow<ptrdiff_t>(img_size), 0, data_img, context);
   Im2col<float, StorageOrder::NCHW>()(
       data_col,
       img_shape,
@@ -858,10 +862,10 @@ SPECIALIZED_ROWWISESUM(int64_t)
 SPECIALIZED_ROWWISESUM(double)
 #undef SPECIALIZED_ROWWISESUM
 
-#define SPECIALIZED_SUM(T)                                                                             \
-  template <>                                                                                          \
-  void Sum<T, CPUMathUtil>(int N, const T* x, T* y, CPUMathUtil* /* unused */, Tensor* /* unused */) { \
-    *y = ConstEigenVectorMap<T>(x, N).sum();                                                           \
+#define SPECIALIZED_SUM(T)                                                       \
+  template <>                                                                    \
+  void Sum<T, CPUMathUtil>(int N, const T* x, T* y, CPUMathUtil* /* unused */) { \
+    *y = ConstEigenVectorMap<T>(x, N).sum();                                     \
   }
 
 SPECIALIZED_SUM(float);

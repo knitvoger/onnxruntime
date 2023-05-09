@@ -73,13 +73,13 @@ Status BatchNorm<T>::ComputeInternal(OpKernelContext* p_op_kernel_context) const
   Tensor* saved_mean = p_op_kernel_context->Output(3, channel_shape);
   Tensor* saved_var = p_op_kernel_context->Output(4, channel_shape);
 
-  auto x_data = reinterpret_cast<const CudaT*>(X->template Data<T>());
-  auto scale_data = reinterpret_cast<const CudaT*>(scale->template Data<T>());
-  auto b_data = reinterpret_cast<const CudaT*>(B->template Data<T>());
-  auto mean_data = reinterpret_cast<const CudaT*>(mean->template Data<T>());
-  auto var_data = reinterpret_cast<const CudaT*>(var->template Data<T>());
+  auto x_data = reinterpret_cast<const CudaT*>(X->Data<T>());
+  auto scale_data = reinterpret_cast<const CudaT*>(scale->Data<T>());
+  auto b_data = reinterpret_cast<const CudaT*>(B->Data<T>());
+  auto mean_data = reinterpret_cast<const CudaT*>(mean->Data<T>());
+  auto var_data = reinterpret_cast<const CudaT*>(var->Data<T>());
 
-  auto y_data = reinterpret_cast<CudaT*>(Y->template MutableData<T>());
+  auto y_data = reinterpret_cast<CudaT*>(Y->MutableData<T>());
 
   const auto alpha = Consts<CudaT>::One;
   const auto beta = Consts<CudaT>::Zero;
@@ -98,17 +98,17 @@ Status BatchNorm<T>::ComputeInternal(OpKernelContext* p_op_kernel_context) const
 
     // Convert the scale, B, mean, var to float
     const int64_t C = x_shape.GetDims()[1];
-    auto f_scale = GetScratchBuffer<float>(C);
-    auto f_B = GetScratchBuffer<float>(C);
-    auto f_mean = GetScratchBuffer<float>(C);
-    auto f_var = GetScratchBuffer<float>(C);
-    Impl_Cast<CudaT, float>(Stream(), scale_data, f_scale.get(), C);
-    Impl_Cast<CudaT, float>(Stream(), b_data, f_B.get(), C);
-    Impl_Cast<CudaT, float>(Stream(), mean_data, f_mean.get(), C);
-    Impl_Cast<CudaT, float>(Stream(), var_data, f_var.get(), C);
+    auto f_scale = GetScratchBuffer<float>(C, p_op_kernel_context->GetComputeStream());
+    auto f_B = GetScratchBuffer<float>(C, p_op_kernel_context->GetComputeStream());
+    auto f_mean = GetScratchBuffer<float>(C, p_op_kernel_context->GetComputeStream());
+    auto f_var = GetScratchBuffer<float>(C, p_op_kernel_context->GetComputeStream());
+    Impl_Cast<CudaT, float>(Stream(p_op_kernel_context), scale_data, f_scale.get(), C);
+    Impl_Cast<CudaT, float>(Stream(p_op_kernel_context), b_data, f_B.get(), C);
+    Impl_Cast<CudaT, float>(Stream(p_op_kernel_context), mean_data, f_mean.get(), C);
+    Impl_Cast<CudaT, float>(Stream(p_op_kernel_context), var_data, f_var.get(), C);
 
-    CUDNN_RETURN_IF_ERROR(cudnnBatchNormalizationForwardInference(
-        CudnnHandle(),
+    CUDNN_RETURN_IF_ERROR(BatchNormalizationForwardInferenceHelper(
+        GetCudnnHandle(p_op_kernel_context),
         cudnn_batch_norm_mode_,
         &alpha,
         &beta,
@@ -131,13 +131,13 @@ Status BatchNorm<T>::ComputeInternal(OpKernelContext* p_op_kernel_context) const
 
   // in BatchNorm Forward Training mode if all 5 outputs present
   if (running_mean && running_var && saved_mean && saved_var) {
-    auto running_mean_data = reinterpret_cast<CudaT*>(running_mean->template MutableData<T>());
-    auto running_var_data = reinterpret_cast<CudaT*>(running_var->template MutableData<T>());
-    auto saved_mean_data = reinterpret_cast<CudaT*>(saved_mean->template MutableData<T>());
-    auto saved_inv_var_data = reinterpret_cast<CudaT*>(saved_var->template MutableData<T>());
+    auto running_mean_data = reinterpret_cast<CudaT*>(running_mean->MutableData<T>());
+    auto running_var_data = reinterpret_cast<CudaT*>(running_var->MutableData<T>());
+    auto saved_mean_data = reinterpret_cast<CudaT*>(saved_mean->MutableData<T>());
+    auto saved_inv_var_data = reinterpret_cast<CudaT*>(saved_var->MutableData<T>());
 
-    CUDNN_RETURN_IF_ERROR(cudnnBatchNormalizationForwardTraining(
-        CudnnHandle(),
+    CUDNN_RETURN_IF_ERROR(BatchNormalizationForwardTrainingHelper(
+        GetCudnnHandle(p_op_kernel_context),
         cudnn_batch_norm_mode_,
         &alpha,
         &beta,
@@ -156,8 +156,8 @@ Status BatchNorm<T>::ComputeInternal(OpKernelContext* p_op_kernel_context) const
         saved_inv_var_data));
     // in BatchNorm Forward Inference mode if only Y output present
   } else {
-    CUDNN_RETURN_IF_ERROR(cudnnBatchNormalizationForwardInference(
-        CudnnHandle(),
+    CUDNN_RETURN_IF_ERROR(BatchNormalizationForwardInferenceHelper(
+        GetCudnnHandle(p_op_kernel_context),
         cudnn_batch_norm_mode_,
         &alpha,
         &beta,

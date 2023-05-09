@@ -160,7 +160,7 @@ module.exports = {
       '@typescript-eslint/naming-convention': 'off'
     }
   }, {
-    files: ['react_native/example/src/**/*.ts', 'react_native/example/src/**/*.tsx'], rules: {
+    files: ['react_native/e2e/src/**/*.ts', 'react_native/e2e/src/**/*.tsx'], rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',
       '@typescript-eslint/no-unnecessary-type-assertion': 'off',
       'unicorn/filename-case': 'off',
@@ -176,6 +176,17 @@ module.exports = {
       'import/no-extraneous-dependencies': 'off',
       'prefer-arrow/prefer-arrow-functions': 'off',
       'no-console': 'off'
+    }
+  }, {
+    files: ['scripts/**/*.ts'], rules: {
+      'import/no-extraneous-dependencies': 'off',
+      'no-console': 'off'
+    }
+  }, {
+    files: ['web/lib/**/3rd-party/**/*.ts'], rules: {
+      'header/header': 'off',
+      'unicorn/filename-case': 'off',
+      '@typescript-eslint/explicit-module-boundary-types': 'off',
     }
   }],
   extends: [

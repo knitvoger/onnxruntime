@@ -4,6 +4,7 @@
 #pragma once
 
 #include <unordered_set>
+#include "core/common/inlined_containers.h"
 #include "core/framework/allocator.h"
 #include "core/platform/ort_mutex.h"
 
@@ -18,7 +19,6 @@ class ROCMAllocator : public IAllocator {
                           device_id, OrtMemTypeDefault)) {}
   void* Alloc(size_t size) override;
   void Free(void* p) override;
-  FencePtr CreateFence(const SessionState* session_state) override;
 
  private:
   void CheckDevice(bool throw_when_fail) const;
@@ -47,20 +47,19 @@ class ROCMExternalAllocator : public ROCMAllocator {
   ExternalAlloc alloc_;
   ExternalFree free_;
   ExternalEmptyCache empty_cache_;
-  std::unordered_set<void*> reserved_;
+  InlinedHashSet<void*> reserved_;
 };
 
-//TODO: add a default constructor
+// TODO: add a default constructor
 class ROCMPinnedAllocator : public IAllocator {
  public:
   ROCMPinnedAllocator(OrtDevice::DeviceId device_id, const char* name)
       : IAllocator(
             OrtMemoryInfo(name, OrtAllocatorType::OrtDeviceAllocator,
-                          OrtDevice(OrtDevice::CPU, OrtDevice::MemType::CUDA_PINNED, device_id),
+                          OrtDevice(OrtDevice::CPU, OrtDevice::MemType::HIP_PINNED, device_id),
                           device_id, OrtMemTypeCPUOutput)) {}
 
   void* Alloc(size_t size) override;
   void Free(void* p) override;
-  FencePtr CreateFence(const SessionState* session_state) override;
 };
 }  // namespace onnxruntime

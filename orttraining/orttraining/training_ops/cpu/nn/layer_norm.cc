@@ -11,34 +11,25 @@ namespace contrib {
 
 // LayerNormGrad
 
-#define REGISTER_KERNEL_TYPED(T)                                  \
-  ONNX_OPERATOR_TYPED_KERNEL_EX(                                  \
-      LayerNormalizationGrad,                                     \
-      kMSDomain,                                                  \
-      1,                                                          \
-      T,                                                          \
-      kCpuExecutionProvider,                                      \
-      KernelDefBuilder()                                          \
-          .TypeConstraint("T", DataTypeImpl::GetTensorType<T>()), \
-      LayerNormGrad<T, false>);                                   \
-  ONNX_OPERATOR_TYPED_KERNEL_EX(                                  \
-      SimplifiedLayerNormalizationGrad,                           \
-      kMSDomain,                                                  \
-      1,                                                          \
-      T,                                                          \
-      kCpuExecutionProvider,                                      \
-      KernelDefBuilder()                                          \
-          .TypeConstraint("T", DataTypeImpl::GetTensorType<T>()), \
-      LayerNormGrad<T, true>);                                    \
-  ONNX_OPERATOR_TYPED_KERNEL_EX(                                  \
-      InvertibleLayerNormalizationGrad,                           \
-      kMSDomain,                                                  \
-      1,                                                          \
-      T,                                                          \
-      kCpuExecutionProvider,                                      \
-      KernelDefBuilder()                                          \
-          .TypeConstraint("T", DataTypeImpl::GetTensorType<T>()), \
-      InvertibleLayerNormGrad<T>);
+#define REGISTER_KERNEL_TYPED(T)                                                                          \
+  ONNX_OPERATOR_TYPED_KERNEL_EX(LayerNormalizationGrad, kMSDomain, 1, T, kCpuExecutionProvider,           \
+                                KernelDefBuilder()                                                        \
+                                    .TypeConstraint("T", DataTypeImpl::GetTensorType<T>())                \
+                                    .TypeConstraint("U", DataTypeImpl::GetTensorType<T>())                \
+                                    .TypeConstraint("V", DataTypeImpl::GetTensorType<T>()),               \
+                                LayerNormGrad<T, false>);                                                 \
+  ONNX_OPERATOR_TYPED_KERNEL_EX(SimplifiedLayerNormalizationGrad, kMSDomain, 1, T, kCpuExecutionProvider, \
+                                KernelDefBuilder()                                                        \
+                                    .TypeConstraint("T", DataTypeImpl::GetTensorType<T>())                \
+                                    .TypeConstraint("U", DataTypeImpl::GetTensorType<T>())                \
+                                    .TypeConstraint("V", DataTypeImpl::GetTensorType<T>()),               \
+                                LayerNormGrad<T, true>);                                                  \
+  ONNX_OPERATOR_TYPED_KERNEL_EX(InvertibleLayerNormalizationGrad, kMSDomain, 1, T, kCpuExecutionProvider, \
+                                KernelDefBuilder()                                                        \
+                                    .TypeConstraint("T", DataTypeImpl::GetTensorType<T>())                \
+                                    .TypeConstraint("U", DataTypeImpl::GetTensorType<T>())                \
+                                    .TypeConstraint("V", DataTypeImpl::GetTensorType<T>()),               \
+                                InvertibleLayerNormGrad<T>);
 
 REGISTER_KERNEL_TYPED(float)
 REGISTER_KERNEL_TYPED(double)
@@ -63,7 +54,7 @@ Status LayerNormGrad<T, simplified>::Compute(OpKernelContext* op_kernel_context)
   const auto N = static_cast<Eigen::Index>(X_shape.SizeToDimension(axis));
   const auto M = static_cast<Eigen::Index>(X_shape.SizeFromDimension(axis));
   ORT_ENFORCE(M != 1);
-  
+
   const Tensor* scale = op_kernel_context->Input<Tensor>(input_index++);
   const Tensor* mean;
   if (!simplified) {
@@ -104,10 +95,10 @@ Status LayerNormGrad<T, simplified>::Compute(OpKernelContext* op_kernel_context)
   Array X_mean_difference_over_std_var;
   if (simplified) {
     X_mean_difference_over_std_var =
-      X_arr.rowwise() * inv_std_var_vec.cast<T>().transpose();
+        X_arr.rowwise() * inv_std_var_vec.cast<T>().transpose();
   } else {
     X_mean_difference_over_std_var =
-      (X_arr.rowwise() - mean_vec.cast<T>().transpose()).rowwise() * inv_std_var_vec.cast<T>().transpose();
+        (X_arr.rowwise() - mean_vec.cast<T>().transpose()).rowwise() * inv_std_var_vec.cast<T>().transpose();
   }
   Array A = Y_grad_arr * X_mean_difference_over_std_var;
   Array B = (Y_grad_arr.colwise() * scale_vec).rowwise() * inv_std_var_vec.cast<T>().transpose();

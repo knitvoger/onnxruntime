@@ -38,30 +38,28 @@ thread_local std::map<OpKernel*, ACLNEBatchNorm> BatchNorm<T>::batchNormLayers;
 
 template <typename T>
 Status BatchNorm<T>::Compute(OpKernelContext* context) const {
-
   const Tensor* X = context->Input<Tensor>(0);
-  const Tensor* S = context->Input<Tensor>(1);//scale
+  const Tensor* S = context->Input<Tensor>(1);  // scale
   const Tensor* B = context->Input<Tensor>(2);
-  const Tensor* M = context->Input<Tensor>(3);//mean
-  const Tensor* V = context->Input<Tensor>(4);//var
+  const Tensor* M = context->Input<Tensor>(3);  // mean
+  const Tensor* V = context->Input<Tensor>(4);  // var
 
   ORT_RETURN_IF_ERROR(BatchNormHelper::ValidateInputs(X, S, B, M, V));
 
-  LOGS_DEFAULT(VERBOSE) << "BatchNorm ACL:";  
+  LOGS_DEFAULT(VERBOSE) << "BatchNorm ACL:";
   LOGS_DEFAULT(VERBOSE) << "X " << X->Shape().ToString().c_str();
   LOGS_DEFAULT(VERBOSE) << "params " << S->Shape().ToString().c_str();
   LOGS_DEFAULT(VERBOSE) << std::endl;
 
-  const T* x_data = X->template Data<T>();
+  const T* x_data = X->Data<T>();
 
   Tensor* Y = context->Output(0, X->Shape());
 
-  T* y_data = Y->template MutableData<T>();
+  T* y_data = Y->MutableData<T>();
 
   ACLNEBatchNorm* pBatchNorm;
   BatchNormLayersIterator it = batchNormLayers.find((OpKernel*)this);
   if (it == batchNormLayers.end()) {
-
     ACLNEBatchNorm tbatch_norm;
     tbatch_norm.in = std::make_shared<arm_compute::Tensor>();
     tbatch_norm.mean = std::make_shared<arm_compute::Tensor>();
@@ -81,13 +79,13 @@ Status BatchNorm<T>::Compute(OpKernelContext* context) const {
     tbatch_norm.var->allocator()->init(arm_compute::TensorInfo(ACLTensorShape(V->Shape()), arm_compute::Format::F32));
 
     layer->configure(tbatch_norm.in.get(), tbatch_norm.out.get(),
-      tbatch_norm.mean.get(), tbatch_norm.var.get(), B != nullptr ? tbatch_norm.b.get() : nullptr, S != nullptr ? tbatch_norm.scale.get() : nullptr,
-      epsilon_);//no activation in onnx
+                     tbatch_norm.mean.get(), tbatch_norm.var.get(), B != nullptr ? tbatch_norm.b.get() : nullptr, S != nullptr ? tbatch_norm.scale.get() : nullptr,
+                     epsilon_);  // no activation in onnx
 
-    const T* scale_data = S->template Data<T>();
-    const T* b_data = B->template Data<T>();
-    const T* mean_data = M->template Data<T>();
-    const T* var_data = V->template Data<T>();
+    const T* scale_data = S->Data<T>();
+    const T* b_data = B->Data<T>();
+    const T* mean_data = M->Data<T>();
+    const T* var_data = V->Data<T>();
 
     ACLImportMemory(tbatch_norm.mean->allocator(), (void*)mean_data, M->Shape().Size() * 4);
     ACLImportMemory(tbatch_norm.var->allocator(), (void*)var_data, V->Shape().Size() * 4);
@@ -107,15 +105,13 @@ Status BatchNorm<T>::Compute(OpKernelContext* context) const {
     pBatchNorm = &it->second;
   }
 
-
-  if(X->Shape().Size() != 0 && pBatchNorm->in->info()->has_padding() ){
+  if (X->Shape().Size() != 0 && pBatchNorm->in->info()->has_padding()) {
     importDataToTensor<T>(pBatchNorm->in.get(), x_data);
-  }else{
+  } else {
     ACLImportMemory(pBatchNorm->in->allocator(), (void*)x_data, X->Shape().Size() * 4);
   }
 
-
-  if(Y->Shape().Size() != 0 && pBatchNorm->out->info()->has_padding() ){
+  if (Y->Shape().Size() != 0 && pBatchNorm->out->info()->has_padding()) {
     pBatchNorm->out->allocator()->allocate();
   } else {
     ACLImportMemory(pBatchNorm->out->allocator(), (void*)y_data, Y->Shape().Size() * 4);
@@ -123,8 +119,8 @@ Status BatchNorm<T>::Compute(OpKernelContext* context) const {
 
   pBatchNorm->layer->run();
 
-  if(Y->Shape().Size() != 0 && pBatchNorm->out->info()->has_padding() ){
-      importDataFromTensor<T>(pBatchNorm->out.get(), y_data);
+  if (Y->Shape().Size() != 0 && pBatchNorm->out->info()->has_padding()) {
+    importDataFromTensor<T>(pBatchNorm->out.get(), y_data);
   }
 
   return Status::OK();
@@ -136,11 +132,11 @@ ONNX_OPERATOR_VERSIONED_KERNEL_EX(
     7, 9,
     kAclExecutionProvider,
     KernelDefBuilder()
-      .TypeConstraint("X", DataTypeImpl::GetTensorType<float>())
-      .TypeConstraint("scale", DataTypeImpl::GetTensorType<float>())
-      .TypeConstraint("B", DataTypeImpl::GetTensorType<float>())
-      .TypeConstraint("mean", DataTypeImpl::GetTensorType<float>())
-      .TypeConstraint("var", DataTypeImpl::GetTensorType<float>()),
+        .TypeConstraint("X", DataTypeImpl::GetTensorType<float>())
+        .TypeConstraint("scale", DataTypeImpl::GetTensorType<float>())
+        .TypeConstraint("B", DataTypeImpl::GetTensorType<float>())
+        .TypeConstraint("mean", DataTypeImpl::GetTensorType<float>())
+        .TypeConstraint("var", DataTypeImpl::GetTensorType<float>()),
     BatchNorm<float>);
 
 }  // namespace acl

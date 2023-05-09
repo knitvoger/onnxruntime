@@ -54,7 +54,7 @@ std::shared_ptr<TestCaseResult> TestCaseRequestContext::Run(PThreadPool tpool,
                                                             const ITestCase& c, Ort::Env& env,
                                                             const Ort::SessionOptions& session_opts,
                                                             size_t concurrent_runs, size_t repeat_count) {
-  //temp hack. Because we have no resource control. We may not have enough memory to run this test in parallel
+  // temp hack. Because we have no resource control. We may not have enough memory to run this test in parallel
   if (c.GetTestCaseName() == "coreml_FNS-Candy_ImageNet") {
     concurrent_runs = 1;
   }
@@ -80,12 +80,12 @@ void TestCaseRequestContext::Request(const Callback& cb, PThreadPool tpool,
                                      const Ort::SessionOptions& session_opts,
                                      size_t test_case_id,
                                      size_t concurrent_runs) {
-  //temp hack. Because we have no resource control. We may not have enough memory to run this test in parallel
+  // temp hack. Because we have no resource control. We may not have enough memory to run this test in parallel
   if (c.GetTestCaseName() == "coreml_FNS-Candy_ImageNet") {
     concurrent_runs = 1;
   }
 
-  std::unique_ptr<TestCaseRequestContext> self(new TestCaseRequestContext(cb, tpool, c, env, session_opts, test_case_id));
+  std::unique_ptr<TestCaseRequestContext> self = std::make_unique<TestCaseRequestContext>(cb, tpool, c, env, session_opts, test_case_id);
   CallableFactory<TestCaseRequestContext, void, size_t> f(self.get());
   auto runnable = f.GetCallable<&TestCaseRequestContext::RunAsync>();
   onnxruntime::concurrency::ThreadPool::Schedule(tpool, [runnable, concurrent_runs]() { runnable.Invoke(concurrent_runs); });
@@ -204,8 +204,9 @@ void TestCaseRequestContext::CalculateAndLogStats() const {
         break;
       case EXECUTE_RESULT::MODEL_TYPE_MISMATCH:
         LOGF_DEFAULT(ERROR, "%s: type in model file mismatch. Dataset:%s\n", test_case_name.c_str(), s.c_str());
+        break;
       default:
-        //nothing to do
+        // nothing to do
         break;
     }
     break;

@@ -7,7 +7,7 @@ interface BackendInfo {
   backend: Backend;
   priority: number;
 
-  initializing?: boolean;
+  initPromise?: Promise<void>;
   initialized?: boolean;
   aborted?: boolean;
 }
@@ -30,13 +30,21 @@ export const registerBackend = (name: string, backend: Backend, priority: number
     const currentBackend = backends[name];
     if (currentBackend === undefined) {
       backends[name] = {backend, priority};
-    } else if (currentBackend.backend === backend) {
+    } else if (currentBackend.priority > priority) {
+      // same name is already registered with a higher priority. skip registeration.
       return;
-    } else {
-      throw new Error(`backend "${name}" is already registered`);
+    } else if (currentBackend.priority === priority) {
+      if (currentBackend.backend !== backend) {
+        throw new Error(`cannot register backend "${name}" using priority ${priority}`);
+      }
     }
 
     if (priority >= 0) {
+      const i = backendsSortedByPriority.indexOf(name);
+      if (i !== -1) {
+        backendsSortedByPriority.splice(i, 1);
+      }
+
       for (let i = 0; i < backendsSortedByPriority.length; i++) {
         if (backends[backendsSortedByPriority[i]].priority <= priority) {
           backendsSortedByPriority.splice(i, 0, name);
@@ -67,22 +75,25 @@ export const resolveBackend = async(backendHints: readonly string[]): Promise<Ba
     if (backendInfo) {
       if (backendInfo.initialized) {
         return backendInfo.backend;
-      } else if (backendInfo.initializing) {
-        throw new Error(`backend "${backendName}" is being initialized; cannot initialize multiple times.`);
       } else if (backendInfo.aborted) {
         continue;  // current backend is unavailable; try next
       }
 
+      const isInitializing = !!backendInfo.initPromise;
       try {
-        backendInfo.initializing = true;
-        await backendInfo.backend.init();
+        if (!isInitializing) {
+          backendInfo.initPromise = backendInfo.backend.init();
+        }
+        await backendInfo.initPromise;
         backendInfo.initialized = true;
         return backendInfo.backend;
       } catch (e) {
-        errors.push({name: backendName, err: e});
+        if (!isInitializing) {
+          errors.push({name: backendName, err: e});
+        }
         backendInfo.aborted = true;
       } finally {
-        backendInfo.initializing = false;
+        delete backendInfo.initPromise;
       }
     }
   }

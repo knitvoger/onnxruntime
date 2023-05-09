@@ -1,6 +1,5 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
-// This file is excluded from the build if onnxruntime_PYBIND_EXPORT_OPSCHEMA not defined
 
 #include "python/onnxruntime_pybind_state_common.h"
 #include "core/framework/kernel_registry.h"
@@ -22,67 +21,69 @@ void addGlobalSchemaFunctions(pybind11::module& m) {
         std::vector<onnxruntime::KernelDef> result;
 
         std::vector<std::shared_ptr<onnxruntime::IExecutionProviderFactory>> factories = {
-            onnxruntime::CreateExecutionProviderFactory_CPU(0),
+            onnxruntime::CPUProviderFactoryCreator::Create(0),
 #ifdef USE_CUDA
             []() {
               OrtCUDAProviderOptions provider_options{};
-              return CreateExecutionProviderFactory_Cuda(&provider_options);
+              return CudaProviderFactoryCreator::Create(&provider_options);
             }(),
 #endif
 #ifdef USE_ROCM
-            onnxruntime::CreateExecutionProviderFactory_ROCM(
-                [&]() {
-                  ROCMExecutionProviderInfo info{};
-                  info.device_id = cuda_device_id;
-                  info.gpu_mem_limit = gpu_mem_limit;
-                  info.arena_extend_strategy = arena_extend_strategy;
-                  info.external_allocator_info = external_allocator_info;
-                  return info;
-                }()),
+            []() {
+              OrtROCMProviderOptions provider_options;
+              return onnxruntime::RocmProviderFactoryCreator::Create(&provider_options);
+            }(),
 #endif
 #ifdef USE_DNNL
-            onnxruntime::CreateExecutionProviderFactory_Dnnl(1),
+            onnxruntime::DnnlProviderFactoryCreator::Create(1),
 #endif
 #ifdef USE_OPENVINO
-            onnxruntime::CreateExecutionProviderFactory_OpenVINO(openvino_device_type, false, "", 8, false, ""),
+            []() {
+              OrtOpenVINOProviderOptions provider_options;
+              return onnxruntime::OpenVINOProviderFactoryCreator::Create(&provider_options);
+            }(),
 #endif
 #ifdef USE_TENSORRT
-            onnxruntime::CreateExecutionProviderFactory_Tensorrt(
-                [&]() {
-                  TensorrtExecutionProviderInfo info{};
-                  return info;
-                }()),
+            onnxruntime::TensorrtProviderFactoryCreator::Create(0),
 #endif
 #ifdef USE_MIGRAPHX
-            onnxruntime::CreateExecutionProviderFactory_MIGraphX(0),
+            onnxruntime::MIGraphXProviderFactoryCreator::Create(0),
 #endif
 #ifdef USE_VITISAI
-            onnxruntime::CreateExecutionProviderFactory_VITISAI("DPUCADX8G", 0, "", ""),
+            onnxruntime::VitisAIProviderFactoryCreator::Create(ProviderOptions{}),
 #endif
 #ifdef USE_ACL
-            onnxruntime::CreateExecutionProviderFactory_ACL(0),
+            onnxruntime::ACLProviderFactoryCreator::Create(0),
 #endif
 #ifdef USE_ARMNN
-            onnxruntime::CreateExecutionProviderFactory_ArmNN(0),
+            onnxruntime::ArmNNProviderFactoryCreator::Create(0),
 #endif
 #ifdef USE_DML
-            onnxruntime::CreateExecutionProviderFactory_DML(0),
+            onnxruntime::DMLProviderFactoryCreator::Create(0, /*skip_software_device_check*/ true),
 #endif
 #ifdef USE_NNAPI
-            onnxruntime::CreateExecutionProviderFactory_NNAPI(0),
+            onnxruntime::NnapiProviderFactoryCreator::Create(0, std::optional<std::string>()),
 #endif
 #ifdef USE_RKNPU
-            onnxruntime::CreateExecutionProviderFactory_Rknpu(),
+            onnxruntime::RknpuProviderFactoryCreator::Create(),
 #endif
 #ifdef USE_COREML
-            onnxruntime::CreateExecutionProviderFactory_CoreML(0),
+            onnxruntime::CoreMLProviderFactoryCreator::Create(0),
+#endif
+#ifdef USE_XNNPACK
+            onnxruntime::XnnpackProviderFactoryCreator::Create(ProviderOptions{}, nullptr),
+#endif
+#ifdef USE_CANN
+            []() {
+              OrtCANNProviderOptions provider_options{};
+              return CannProviderFactoryCreator::Create(&provider_options);
+            }(),
 #endif
         };
 
         for (const auto& f : factories) {
-          for (const auto& m : f->CreateProvider()
-                                   ->GetKernelRegistry()
-                                   ->GetKernelCreateMap()) {
+          auto kernel_registry = f->CreateProvider()->GetKernelRegistry();
+          for (const auto& m : kernel_registry->GetKernelCreateMap()) {
             result.emplace_back(*(m.second.kernel_def));
           }
         }
@@ -208,5 +209,5 @@ void addOpSchemaSubmodule(py::module& m) {
       .value("COMMON", ONNX_NAMESPACE::OpSchema::SupportType::COMMON)
       .value("EXPERIMENTAL", ONNX_NAMESPACE::OpSchema::SupportType::EXPERIMENTAL);
 }
-}
+}  // namespace python
 }  // namespace onnxruntime

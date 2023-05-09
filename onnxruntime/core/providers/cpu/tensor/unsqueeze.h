@@ -22,13 +22,13 @@ class UnsqueezeBase {
  protected:
   UnsqueezeBase(const OpKernelInfo& info) {
     size_t num_inputs = info.GetInputCount();
-    if (num_inputs == 1) {  //axes must be a valid attribute
+    if (num_inputs == 1) {  // axes must be a valid attribute
       ORT_ENFORCE(info.GetAttrs("axes", axes_).IsOK(), "Missing/Invalid 'axes' attribute value");
     }
   }
 
  private:
-  std::vector<int64_t> axes_;
+  TensorShapeVector axes_;
 };
 
 class Unsqueeze final : public OpKernel, public UnsqueezeBase {

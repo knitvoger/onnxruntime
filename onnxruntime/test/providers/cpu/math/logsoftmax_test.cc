@@ -39,7 +39,7 @@ static void RunTest(const std::vector<float>& x_vals,
 }
 
 TEST(LogSoftmaxOperator, Simple) {
-  // https://github.com/onnx/onnx/blob/master/docs/Operators.md#LogSoftmax
+  // https://github.com/onnx/onnx/blob/main/docs/Operators.md#LogSoftmax
   // x = np.array([[-1, 0, 1]]).astype(np.float32)
   // # expected output[[-2.40760589, -1.40760589, -0.40760589]]
 
@@ -65,8 +65,8 @@ TEST(LogSoftmaxOperator, LargeNumber) {
   RunTest(x_vals, expected_vals, dimensions);
 }
 
-//np.random.seed(123)   # Use a seed so we can replicate the input and expected values here and in python
-//x = np.abs(np.random.randn(3, 4, 5).astype(np.float32))
+// np.random.seed(123)   # Use a seed so we can replicate the input and expected values here and in python
+// x = np.abs(np.random.randn(3, 4, 5).astype(np.float32))
 static std::vector<int64_t> three_dimensions = {3, 4, 5};
 static std::vector<float> x_vals_3dims = {
     1.0856307f, 0.99734545f, 0.2829785f, 1.5062947f, 0.5786002f,
@@ -255,11 +255,35 @@ TEST(LogSoftmaxOperator, InvalidAxis) {
           dimensions,
           /*opset*/ 12,
           /* invalid axis */ -7,
-          false,  //TensorRT parser: Assertion failed: axis >= 0 && axis < nbDims
+          false,  // TensorRT parser: Assertion failed: axis >= 0 && axis < nbDims
           OpTester::ExpectResult::kExpectFailure,
           // ONNX has a bug in the error message generation so this is somewhat cryptic until it's fixed. Message should be:
           "[ShapeInferenceError] 'axis' must be in [-2 , 1]. Its actual value is: -7");
   //", 1]. Its actual value is: -7");
+}
+
+TEST(LogSoftmaxOperator, 2DInputReduceOnAxis1WithLargeDim) {
+  std::vector<float> x_vals(1025, 0.0f);
+  std::vector<float> expected_vals(1025, 0.0f);
+  float incre_val = 0.01f;
+  for (size_t i = 0; i < x_vals.size(); ++i) {
+    x_vals[i] = incre_val;
+    incre_val += 0.01f;
+  }
+
+  float sum = 0.0f;
+  for (size_t i = 0; i < x_vals.size(); ++i) {
+    expected_vals[i] = std::exp(x_vals[i]);
+    sum += expected_vals[i];
+  }
+
+  for (size_t i = 0; i < x_vals.size(); ++i) {
+    expected_vals[i] = std::log(expected_vals[i] / sum);
+  }
+
+  std::vector<int64_t> dimensions = {1, 1025};
+
+  RunTest(x_vals, expected_vals, dimensions);
 }
 
 }  // namespace test

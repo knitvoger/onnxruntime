@@ -6,20 +6,41 @@
 
 #import <Foundation/Foundation.h>
 #import <React/RCTLog.h>
-#import <onnxruntime/onnxruntime_cxx_api.h>
+
+// Note: Using below syntax for including ort c api and ort extensions headers to resolve a compiling error happened
+// in an expo react native ios app when ort extensions enabled (a redefinition error of multiple object types defined
+// within ORT C API header). It's an edge case that compiler allows both ort c api headers to be included when #include
+// syntax doesn't match. For the case when extensions not enabled, it still requires a onnxruntime prefix directory for
+// searching paths. Also in general, it's a convention to use #include for C/C++ headers rather then #import. See:
+// https://google.github.io/styleguide/objcguide.html#import-and-include
+// https://microsoft.github.io/objc-guide/Headers/ImportAndInclude.html
+#ifdef ORT_ENABLE_EXTENSIONS
+#include "onnxruntime_cxx_api.h"
+#include "onnxruntime_extensions.h"
+#else
+#include "onnxruntime/onnxruntime_cxx_api.h"
+#endif
 
 @implementation OnnxruntimeModule
 
 struct SessionInfo {
   std::unique_ptr<Ort::Session> session;
-  std::vector<Ort::MemoryAllocation> allocations;
   std::vector<const char *> inputNames;
+  std::vector<Ort::AllocatedStringPtr> inputNames_ptrs;
   std::vector<const char *> outputNames;
+  std::vector<Ort::AllocatedStringPtr> outputNames_ptrs;
 };
 
 static Ort::Env *ortEnv = new Ort::Env(ORT_LOGGING_LEVEL_INFO, "Default");
 static NSMutableDictionary *sessionMap = [NSMutableDictionary dictionary];
 static Ort::AllocatorWithDefaultOptions ortAllocator;
+
+static int nextSessionId = 0;
+- (NSString *)getNextSessionKey {
+  NSString *key = @(nextSessionId).stringValue;
+  nextSessionId++;
+  return key;
+}
 
 RCT_EXPORT_MODULE(Onnxruntime)
 
@@ -41,8 +62,31 @@ RCT_EXPORT_METHOD(loadModel
   @try {
     NSDictionary *resultMap = [self loadModel:modelPath options:options];
     resolve(resultMap);
-  } @catch (NSException *exception) {
-    reject(@"onnxruntime", @"can't load model", nil);
+  } @catch (...) {
+    reject(@"onnxruntime", @"failed to load model", nil);
+  }
+}
+
+/**
+ * React native binding API to load a model using BASE64 encoded model data string.
+ *
+ * @param modelData the BASE64 encoded model data string
+ * @param options onnxruntime session options
+ * @param resolve callback for returning output back to react native js
+ * @param reject callback for returning an error back to react native js
+ * @note when run() is called, the same modelPath must be passed into the first parameter.
+ */
+RCT_EXPORT_METHOD(loadModelFromBase64EncodedBuffer
+                  : (NSString *)modelDataBase64EncodedString options
+                  : (NSDictionary *)options resolver
+                  : (RCTPromiseResolveBlock)resolve rejecter
+                  : (RCTPromiseRejectBlock)reject) {
+  @try {
+    NSData *modelDataDecoded = [[NSData alloc] initWithBase64EncodedString:modelDataBase64EncodedString options:0];
+    NSDictionary *resultMap = [self loadModelFromBuffer:modelDataDecoded options:options];
+    resolve(resultMap);
+  } @catch (...) {
+    reject(@"onnxruntime", @"failed to load model from buffer", nil);
   }
 }
 
@@ -66,50 +110,76 @@ RCT_EXPORT_METHOD(run
   @try {
     NSDictionary *resultMap = [self run:url input:input output:output options:options];
     resolve(resultMap);
-  } @catch (NSException *exception) {
-    reject(@"onnxruntime", @"can't run model", nil);
+  } @catch (...) {
+    reject(@"onnxruntime", @"failed to run model", nil);
   }
 }
 
 /**
  * Load a model using given model path.
  *
- * @param modelPath a model file location. it's used as a key when multiple sessions are created, i.e. multiple models
- * are loaded.
- * @param options onnxruntime session options
+ * @param modelPath a model file location.
+ * @param options onnxruntime session options.
  * @note when run() is called, the same modelPath must be passed into the first parameter.
  */
 - (NSDictionary *)loadModel:(NSString *)modelPath options:(NSDictionary *)options {
-  NSValue *value = [sessionMap objectForKey:modelPath];
+  return [self loadModelImpl:modelPath modelData:nil options:options];
+}
+
+/**
+ * Load a model using given model data array
+ *
+ * @param modelData the model data buffer.
+ * @param options onnxruntime session options
+ */
+- (NSDictionary *)loadModelFromBuffer:(NSData *)modelData options:(NSDictionary *)options {
+  return [self loadModelImpl:@"" modelData:modelData options:options];
+}
+
+/**
+ * Load model implementation method given either model data array or model path
+ *
+ * @param modelPath the model file location.
+ * @param modelData the model data buffer.
+ * @param options onnxruntime session options.
+ */
+- (NSDictionary *)loadModelImpl:(NSString *)modelPath modelData:(NSData *)modelData options:(NSDictionary *)options {
   SessionInfo *sessionInfo = nullptr;
-  if (value == nil) {
-    sessionInfo = new SessionInfo();
+  sessionInfo = new SessionInfo();
+  Ort::SessionOptions sessionOptions = [self parseSessionOptions:options];
 
-    Ort::SessionOptions sessionOptions = [self parseSessionOptions:options];
+#ifdef ORT_ENABLE_EXTENSIONS
+  Ort::ThrowOnError(RegisterCustomOps(sessionOptions, OrtGetApiBase()));
+#endif
+
+  if (modelData == nil) {
     sessionInfo->session.reset(new Ort::Session(*ortEnv, [modelPath UTF8String], sessionOptions));
-
-    sessionInfo->inputNames.reserve(sessionInfo->session->GetInputCount());
-    for (size_t i = 0; i < sessionInfo->session->GetInputCount(); ++i) {
-      auto inputName = sessionInfo->session->GetInputName(i, ortAllocator);
-      sessionInfo->allocations.emplace_back(ortAllocator, inputName, strlen(inputName) + 1);
-      sessionInfo->inputNames.emplace_back(inputName);
-    }
-
-    sessionInfo->outputNames.reserve(sessionInfo->session->GetOutputCount());
-    for (size_t i = 0; i < sessionInfo->session->GetOutputCount(); ++i) {
-      auto outputName = sessionInfo->session->GetOutputName(i, ortAllocator);
-      sessionInfo->allocations.emplace_back(ortAllocator, outputName, strlen(outputName) + 1);
-      sessionInfo->outputNames.emplace_back(outputName);
-    }
-
-    value = [NSValue valueWithPointer:(void *)sessionInfo];
-    sessionMap[modelPath] = value;
   } else {
-    sessionInfo = (SessionInfo *)[value pointerValue];
+    NSUInteger dataLength = [modelData length];
+    Byte *modelBytes = (Byte *)[modelData bytes];
+    sessionInfo->session.reset(new Ort::Session(*ortEnv, modelBytes, (size_t)dataLength, sessionOptions));
   }
 
+  sessionInfo->inputNames.reserve(sessionInfo->session->GetInputCount());
+  for (size_t i = 0; i < sessionInfo->session->GetInputCount(); ++i) {
+    auto inputName = sessionInfo->session->GetInputNameAllocated(i, ortAllocator);
+    sessionInfo->inputNames.emplace_back(inputName.get());
+    sessionInfo->inputNames_ptrs.emplace_back(std::move(inputName));
+  }
+
+  sessionInfo->outputNames.reserve(sessionInfo->session->GetOutputCount());
+  for (size_t i = 0; i < sessionInfo->session->GetOutputCount(); ++i) {
+    auto outputName = sessionInfo->session->GetOutputNameAllocated(i, ortAllocator);
+    sessionInfo->outputNames.emplace_back(outputName.get());
+    sessionInfo->outputNames_ptrs.emplace_back(std::move(outputName));
+  }
+
+  NSString *key = [self getNextSessionKey];
+  NSValue *value = [NSValue valueWithPointer:(void *)sessionInfo];
+  sessionMap[key] = value;
+
   NSMutableDictionary *resultMap = [NSMutableDictionary dictionary];
-  resultMap[@"key"] = modelPath;
+  resultMap[@"key"] = key;
 
   NSMutableArray *inputNames = [NSMutableArray array];
   for (auto inputName : sessionInfo->inputNames) {

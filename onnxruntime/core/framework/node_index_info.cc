@@ -32,7 +32,7 @@ static void FindMinAndMaxNodeIndex(const TValidNodes& nodes, NodeIndex& min, Nod
   std::for_each(nodes.cbegin(), nodes.cend(), [&min, &max](const Node& node) {
     auto idx = node.Index();
     if (idx > max) max = idx;
-    //NodeIndex is size_t type
+    // NodeIndex is size_t type
     if (idx < min) min = idx;
   });
 
@@ -53,7 +53,7 @@ void NodeIndexInfo::Init(const TValidNodes& nodes, NodeIndex max_node_index,
   }
 
   std::size_t total_def_count{};
-  const bool include_missing_optional_defs = true;
+  constexpr bool include_missing_optional_defs = true;
 
   if (max_node_index == 0) {
     FindMinAndMaxNodeIndex(nodes, min_node_index_, max_node_index);

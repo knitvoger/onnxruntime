@@ -1,18 +1,18 @@
 /**
-* Copyright (c) 2016-present, Facebook, Inc.
-*
-* Licensed under the Apache License, Version 2.0 (the "License");
-* you may not use this file except in compliance with the License.
-* You may obtain a copy of the License at
-*
-*     http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS,
-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific language governing permissions and
-* limitations under the License.
-*/
+ * Copyright (c) 2016-present, Facebook, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 // Modifications Copyright (c) Microsoft.
 
 #include "core/util/math.h"
@@ -25,7 +25,7 @@ namespace onnxruntime {
 
 #define VECTOR_HEAD(x) x.size() > 0 ? &x[0] : NULL
 
-//parameter is thread pool size
+// parameter is thread pool size
 class MathGemmTest : public testing::TestWithParam<int> {
  protected:
   static OrtThreadPoolParams CreateThreadPoolOptions(int size) {
@@ -51,9 +51,9 @@ TEST_P(MathGemmTest, GemmNoTransNoTrans) {
     EXPECT_EQ(W[i], 1);
   }
 
-  const float kOne = 1.0;
-  const float kPointFive = 0.5;
-  const float kZero = 0.0;
+  constexpr float kOne = 1.0;
+  constexpr float kPointFive = 0.5;
+  constexpr float kZero = 0.0;
   math::Gemm<float>(CblasNoTrans, CblasNoTrans, 5, 6, 10, kOne,
                     VECTOR_HEAD(X), VECTOR_HEAD(W), kZero, VECTOR_HEAD(Y),
                     tp.get());
@@ -96,9 +96,9 @@ TEST_P(MathGemmTest, GemmNoTransTrans) {
     EXPECT_EQ(W[i], 1);
   }
 
-  const float kOne = 1.0;
-  const float kPointFive = 0.5;
-  const float kZero = 0.0;
+  constexpr float kOne = 1.0;
+  constexpr float kPointFive = 0.5;
+  constexpr float kZero = 0.0;
   math::Gemm<float>(CblasNoTrans, CblasTrans, 5, 6, 10, kOne,
                     VECTOR_HEAD(X), VECTOR_HEAD(W), kZero, VECTOR_HEAD(Y),
                     tp.get());
@@ -141,9 +141,9 @@ TEST(MathTest, GemvNoTrans) {
     EXPECT_EQ(X[i], 1);
   }
 
-  const float kOne = 1.0;
-  const float kPointFive = 0.5;
-  const float kZero = 0.0;
+  constexpr float kOne = 1.0;
+  constexpr float kPointFive = 0.5;
+  constexpr float kZero = 0.0;
   math::Gemv<float, CPUMathUtil>(CblasNoTrans, 5, 10, kOne, VECTOR_HEAD(A), VECTOR_HEAD(X),
                                  kZero, VECTOR_HEAD(Y), &provider);
   for (size_t i = 0; i < Y.size(); ++i) {
@@ -179,9 +179,9 @@ TEST(MathTest, GemvTrans) {
     EXPECT_EQ(X[i], 1);
   }
 
-  const float kOne = 1.0;
-  const float kPointFive = 0.5;
-  const float kZero = 0.0;
+  constexpr float kOne = 1.0;
+  constexpr float kPointFive = 0.5;
+  constexpr float kZero = 0.0;
   math::Gemv<float, CPUMathUtil>(CblasTrans, 6, 10, kOne, VECTOR_HEAD(A), VECTOR_HEAD(X),
                                  kZero, VECTOR_HEAD(Y), &provider);
   for (size_t i = 0; i < Y.size(); ++i) {

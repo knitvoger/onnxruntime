@@ -6,8 +6,16 @@ import * as path from 'path';
 
 import {OrtWasmModule} from './binding/ort-wasm';
 import {OrtWasmThreadedModule} from './binding/ort-wasm-threaded';
-import ortWasmFactoryThreaded from './binding/ort-wasm-threaded.js';
-import ortWasmFactory from './binding/ort-wasm.js';
+
+/* eslint-disable @typescript-eslint/no-require-imports */
+const ortWasmFactory: EmscriptenModuleFactory<OrtWasmModule> =
+    BUILD_DEFS.DISABLE_WEBGPU ? require('./binding/ort-wasm.js') : require('./binding/ort-wasm-simd.jsep.js');
+
+const ortWasmFactoryThreaded: EmscriptenModuleFactory<OrtWasmModule> = !BUILD_DEFS.DISABLE_WASM_THREAD ?
+    (BUILD_DEFS.DISABLE_WEBGPU ? require('./binding/ort-wasm-threaded.js') :
+                                 require('./binding/ort-wasm-simd-threaded.jsep.js')) :
+    ortWasmFactory;
+/* eslint-enable @typescript-eslint/no-require-imports */
 
 let wasm: OrtWasmModule|undefined;
 let initialized = false;
@@ -92,10 +100,10 @@ export const initializeWebAssembly = async(flags: Env.WebAssemblyFlags): Promise
   const useThreads = numThreads > 1 && isMultiThreadSupported();
   const useSimd = simd && isSimdSupported();
 
-  const wasmPrefixOverride = typeof flags.wasmPaths === 'string' ? flags.wasmPaths : undefined;
-  const wasmFileName = getWasmFileName(false, useThreads);
-  const wasmOverrideFileName = getWasmFileName(useSimd, useThreads);
-  const wasmPathOverride = typeof flags.wasmPaths === 'object' ? flags.wasmPaths[wasmOverrideFileName] : undefined;
+  const wasmPaths = flags.wasmPaths;
+  const wasmPrefixOverride = typeof wasmPaths === 'string' ? wasmPaths : undefined;
+  const wasmFileName = getWasmFileName(useSimd, useThreads);
+  const wasmPathOverride = typeof wasmPaths === 'object' ? wasmPaths[wasmFileName] : undefined;
 
   let isTimeout = false;
 
@@ -116,7 +124,8 @@ export const initializeWebAssembly = async(flags: Env.WebAssemblyFlags): Promise
     const factory = useThreads ? ortWasmFactoryThreaded : ortWasmFactory;
     const config: Partial<OrtWasmModule> = {
       locateFile: (fileName: string, scriptDirectory: string) => {
-        if (fileName.endsWith('.worker.js') && typeof Blob !== 'undefined') {
+        if (!BUILD_DEFS.DISABLE_WASM_THREAD && useThreads && fileName.endsWith('.worker.js') &&
+            typeof Blob !== 'undefined') {
           return URL.createObjectURL(new Blob(
               [
                 // This require() function is handled by webpack to load file content of the corresponding .worker.js
@@ -126,21 +135,33 @@ export const initializeWebAssembly = async(flags: Env.WebAssemblyFlags): Promise
               {type: 'text/javascript'}));
         }
 
-        if (fileName === wasmFileName) {
-          const prefix: string = wasmPrefixOverride ?? scriptDirectory;
-          return wasmPathOverride ?? prefix + wasmOverrideFileName;
+        if (fileName.endsWith('.wasm')) {
+          if (wasmPathOverride) {
+            return wasmPathOverride;
+          }
+
+          const prefix = wasmPrefixOverride ?? scriptDirectory;
+
+          if (!BUILD_DEFS.DISABLE_WEBGPU) {
+            if (wasmFileName === 'ort-wasm-simd.wasm') {
+              return prefix + 'ort-wasm-simd.jsep.wasm';
+            } else if (wasmFileName === 'ort-wasm-simd-threaded.wasm') {
+              return prefix + 'ort-wasm-simd-threaded.jsep.wasm';
+            }
+          }
+
+          return prefix + wasmFileName;
         }
 
         return scriptDirectory + fileName;
       }
     };
 
-    if (useThreads) {
+    if (!BUILD_DEFS.DISABLE_WASM_THREAD && useThreads) {
       if (typeof Blob === 'undefined') {
         config.mainScriptUrlOrBlob = path.join(__dirname, 'ort-wasm-threaded.js');
       } else {
-        const scriptSourceCode =
-            `var ortWasmThreaded=(function(){var _scriptDir;return ${ortWasmFactoryThreaded.toString()}})();`;
+        const scriptSourceCode = `var ortWasmThreaded=(function(){var _scriptDir;return ${factory.toString()}})();`;
         config.mainScriptUrlOrBlob = new Blob([scriptSourceCode], {type: 'text/javascript'});
       }
     }
